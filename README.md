@@ -23,21 +23,21 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
 ---
 
 ## 📂 Project Structure  
-Jobber-Quotes/
-├─ config/ # Configuration files (API keys, settings, environment)
-├─ src/ # Application source code
-├─ docs/ # Public legal pages for API compliance
-│ ├─ privacy-policy.html
-│ └─ terms-of-service.html
-├─ README.md # Project documentation
-└─ requirements.txt # Python dependencies
+Jobber-Quotes/   
+├─ config/ # Configuration files (API keys, settings, environment) 
+├─ src/ # Application source code 
+├─ docs/ # Public legal pages for API compliance 
+│ ├─ privacy-policy.html 
+│ └─ terms-of-service.html 
+├─ README.md # Project documentation 
+└─ requirements.txt # Python dependencies 
 
 
 ---
 
 ## ⚙️ Tech Stack  
 
-- **Language:** Python 3.x  
+- **Language:** Python 3.9.13
 - **Frameworks/Libraries:** (to be confirmed — likely FastAPI/Flask + httpx/requests)  
 - **Dev Tools:** Git, PyCharm  
 - **Hosting:** TBD (ngrok/local for dev, cloud for prod)  
