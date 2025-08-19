@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Terms of Service | Shimmer & Shine</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:800px;margin:40px auto;padding:0 16px;line-height:1.6}
+    h1{font-size:1.8rem;margin-bottom:0.2rem}
+    small{color:#666}
+    a{color:#0a66c2;text-decoration:none}
+    a:hover{text-decoration:underline}
+    footer{margin-top:40px;color:#666;font-size:.9rem}
+  </style>
+</head>
+<body>
+  <h1>Terms of Service</h1>
+  <small>Effective date: August 18, 2025</small>
+
+  <h2>1. Agreement</h2>
+  <p>By using Shimmer &amp; Shine services, you agree to these Terms of Service.</p>
+
+  <h2>2. Services</h2>
+  <p>We provide window cleaning and related services. Scope and pricing are set out in quotes or invoices. Changes to scope may affect timing and price.</p>
+
+  <h2>3. Customer Responsibilities</h2>
+  <ul>
+    <li>Provide accurate property and contact details.</li>
+    <li>Ensure safe access to areas we are cleaning.</li>
+    <li>Advise us of fragile items or restrictions before service.</li>
+    <li>Pay according to the agreed terms.</li>
+  </ul>
+
+  <h2>4. Cancellations</h2>
+  <p>We may reschedule due to unsafe weather or conditions. Customers should provide reasonable notice for changes.</p>
+
+  <h2>5. Payments</h2>
+  <p>Unless otherwise agreed, payment is due upon completion of services. Late payments may incur fees.</p>
+
+  <h2>6. Warranties and Disclaimers</h2>
+  <p>Services are provided as is. We disclaim all implied warranties as permitted by law.</p>
+
+  <h2>7. Liability</h2>
+  <p>We are not liable for indirect, incidental, or consequential damages. Total liability is limited to the amount paid for the specific service in question.</p>
+
+  <h2>8. Changes</h2>
+  <p>We may update these Terms of Service. Updates will be posted here with a new effective date.</p>
+
+  <h2>9. Contact</h2>
+  <p>Email: <a href="mailto:sales@shimmershine.org">sales@shimmershine.org</a></p>
+
+  <footer>
+    © <script>document.write(new Date().getFullYear())</script> Shimmer &amp; Shine Window Cleaning Ltd.
+  </footer>
+</body>
+</html>
