@@ -1,6 +1,6 @@
 # Shimmer & Shine – Jobber Quotes AI Scheduler  
 
-This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. It integrates with the **Jobber API** to automate the workflow from approved quotes to confirmed bookings — saving time and improving customer communication.  
+This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. It integrates with the **Jobber API** to automate the workflow from approved quotes to confirmed bookings, saving time and improving customer communication.  
 
 ---
 
@@ -18,7 +18,7 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
   - Books the job into Jobber’s calendar.  
   - Notifies the assigned crew members.  
   - Confirms the tentative/confirmed date and time with the customer.  
-  - Rinse and repeat — no manual touch required.  
+  - Rinse and repeat; no manual touch is required.  
 
 ---
 
