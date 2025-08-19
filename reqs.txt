@@ -1,5 +1,17 @@
-flask==3.0.0
+# Core web framework
+fastapi
+uvicorn[standard]
+
+# HTTP client
+httpx
+
+# GraphQL client
 gql[all]==3.5.0
+
+# Requests is optionalpip install -r requirements.txt
+
 requests==2.31.0
+
+# Env management
 python-dotenv==1.0.0
-sendgrid==6.4.8
+
