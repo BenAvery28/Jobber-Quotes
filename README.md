@@ -24,7 +24,6 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
 
 ## 📂 Project Structure
 
-```text
 Jobber-Quotes/
 ├─ config/          # Configuration files (API keys, settings, environment)
 ├─ src/             # Application source code
@@ -33,7 +32,6 @@ Jobber-Quotes/
 │   └─ terms-of-service.html
 ├─ README.md        # Project documentation
 └─ requirements.txt # Python dependencies
-
 
 
 ---
