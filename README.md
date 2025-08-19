@@ -32,6 +32,7 @@ Jobber-Quotes/
 ├─ docs/            # Public legal pages for API compliance
 
 │   ├─ privacy-policy.html
+
 │   └─ terms-of-service.html
 
 ├─ README.md        # Project documentation
