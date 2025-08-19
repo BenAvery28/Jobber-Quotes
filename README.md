@@ -42,7 +42,7 @@ Jobber-Quotes/
 
 ---
 
-## ⚙ Tech Stack  
+##  Tech Stack  
 
 - **Language:** Python 3.9.13
 - **Frameworks/Libraries:** (to be confirmed — likely FastAPI/Flask + httpx/requests)  
