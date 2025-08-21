@@ -8,8 +8,12 @@ from dotenv import load_dotenv
 
 load_dotenv()  # loads .env into environment
 
-JOBBER_API_KEY = os.getenv("JOBBER_API_KEY")
-JOBBER_API_BASE = "https://api.getjobber.com/api"
+# loading jobber stuff
+JOBBER_CLIENT_ID = os.getenv("JOBBER_CLIENT_ID")
+JOBBER_CLIENT_SECRET = os.getenv("JOBBER_CLIENT_SECRET")
+JOBBER_API_BASE = os.getenv("JOBBER_API_BASE")
+
+# loading weather api key
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
 
