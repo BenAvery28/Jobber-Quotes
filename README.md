@@ -1,10 +1,10 @@
 # Shimmer & Shine – Jobber Quotes AI Scheduler  
 
-This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. It integrates with the **Jobber API** to automate the workflow from approved quotes to confirmed bookings — saving time and improving customer communication.  
+This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. It integrates with the **Jobber API** to automate the workflow from approved quotes to confirmed bookings, saving time and improving customer communication.  
 
 ---
 
-## 🚀 Features  
+##  Features  
 
 - **Quote Approval Flow**  
   - When a quote is approved, the app sends an automatic thank-you message.  
@@ -18,25 +18,31 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
   - Books the job into Jobber’s calendar.  
   - Notifies the assigned crew members.  
   - Confirms the tentative/confirmed date and time with the customer.  
-  - Rinse and repeat — no manual touch required.  
+  - Rinse and repeat; no manual touch is required.  
 
 ---
 
-## 📂 Project Structure
+##  Project Structure
 
-Jobber-Quotes/
-├─ config/          # Configuration files (API keys, settings, environment)
-├─ src/             # Application source code
+Jobber-Quotes/ 
+├─ config/          # Configuration files (API keys, settings, environment)  
+
+├─ src/             # Application source code  
+
 ├─ docs/            # Public legal pages for API compliance
+
 │   ├─ privacy-policy.html
+
 │   └─ terms-of-service.html
+
 ├─ README.md        # Project documentation
+
 └─ requirements.txt # Python dependencies
 
 
 ---
 
-## ⚙️ Tech Stack  
+##  Tech Stack  
 
 - **Language:** Python 3.9.13
 - **Frameworks/Libraries:** (to be confirmed — likely FastAPI/Flask + httpx/requests)  
@@ -45,7 +51,7 @@ Jobber-Quotes/
 
 ---
 
-## 🔑 Jobber API Integration  
+##  Jobber API Integration  
 
 This app uses the **Jobber Public API** via OAuth 2.0.  
 - Callback URL is set in `/docs` for testing (ngrok during dev).  
@@ -53,7 +59,7 @@ This app uses the **Jobber Public API** via OAuth 2.0.
 
 ---
 
-## 📜 Legal Pages  
+##  Legal Pages  
 
 For compliance, the app includes:  
 - [Privacy Policy](https://benavery28.github.io/Jobber-Quotes/privacy-policy.html)  
