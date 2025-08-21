@@ -1,7 +1,14 @@
+#
+#
+#
+#   flask application and the main webhook endpoint to kick off the workflow
+
 import os, time, secrets
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse
 import httpx
+from src.api.weather import check_weather
+from datetime import datetime
 
 AUTH_URL = "https://api.getjobber.com/api/oauth/authorize"
 TOKEN_URL = "https://api.getjobber.com/api/oauth/token"
