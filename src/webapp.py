@@ -6,7 +6,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 import httpx
 from datetime import datetime, timedelta
-from api.scheduler import auto_book  # refactor schedular file to correct spelling
+from api.scheduler import auto_book
+from api.jobber_client import create_job, notify_team, notify_client
+import asyncio
 
 # -------------------
 # CONFIG / GLOBALS
@@ -56,43 +58,30 @@ async def book_job_endpoint(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
 
-    # scheduler determines start time automatically
+    # scheduler determines next start time
     duration = timedelta(hours=int(duration_hours), minutes=(duration_hours % 1) * 60)
-    start_slot_iso = auto_book(VISITS, duration, job_type)  # <- auto_book picks next available slot
+    start_slot_iso = auto_book(VISITS, duration, job_type)
     end_slot_iso = (datetime.fromisoformat(start_slot_iso) + duration).isoformat()
 
     # record the visit in-memory
     VISITS.append({"startAt": start_slot_iso, "endAt": end_slot_iso})
 
-    # push the booking to Jobber
-    mutation = {
-        "query": """
-        mutation CreateJob($input: CreateJobInput!) {
-          jobCreate(input: $input) {
-            job { id title startAt endAt }
-          }
-        }
-        """,
-        "variables": {
-            "input": {
-                "title": title,
-                "startAt": start_slot_iso,
-                "endAt": end_slot_iso,
-                "notes": f"Auto-scheduled. Type: {job_type}"
-            }
-        }
-    }
+    # 1. create the Job in Jobber
+    job_response = await create_job(title, start_slot_iso, end_slot_iso, job_type)
+    try:
+        job_id = job_response["data"]["jobCreate"]["job"]["id"]
+    except KeyError:
+        raise HTTPException(status_code=500, detail=f"Failed to create job: {job_response}")
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            GQL_URL,
-            json=mutation,
-            headers={"Authorization": f"Bearer {JOBBER_API_KEY}"}
-        )
+    # 2. notify team
+    await notify_team(job_id, f"Job scheduled: {title} at {start_slot_iso}")
+
+    # 3. notify client
+    await notify_client(job_id, f"Your job '{title}' is booked for {start_slot_iso} to {end_slot_iso}")
 
     return JSONResponse({
         "scheduled_start": start_slot_iso,
         "scheduled_end": end_slot_iso,
-        "visits_count": len(VISITS),
-        "jobber_response": r.json()
+        "job_id": job_id,
+        "visits_count": len(VISITS)
     })
