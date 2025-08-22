@@ -25,9 +25,13 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
 ##  Project Structure
 
 Jobber-Quotes/ 
-├─ config/          # Configuration files (API keys, settings, environment)  
+├─ config/          # Configuration files (API keys, settings, environment) 
+
+├─ docker/          # Dockerfile
 
 ├─ src/             # Application source code  
+
+│   ├─ api/
 
 ├─ docs/            # Public legal pages for API compliance
 
