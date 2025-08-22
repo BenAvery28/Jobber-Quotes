@@ -1,5 +1,4 @@
-#
-#
+# jobber_client.py
 #
 #   handles all interactions with Jobber’s GraphQL API
 

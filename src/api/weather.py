@@ -1,5 +1,4 @@
-#
-#
+# weather.py
 #
 #   OpenWeatherMap API to check weather conditions
 
@@ -25,8 +24,10 @@ def check_weather(city, date):
         if data['cod'] != 200:
             return False
         weather = data['weather'][0]['main']
+
         bad_conditions = ['Rain', 'Snow', 'Thunderstorm']
         return weather not in bad_conditions
+
     except requests.exceptions.RequestException as e:
         print(f"Weather API error: {e}")
         return False
