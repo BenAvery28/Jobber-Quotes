@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 import httpx
 from datetime import datetime, timedelta
-from api.schedular import auto_book  # refactor schedular file to correct spelling
+from api.scheduler import auto_book  # refactor schedular file to correct spelling
 
 # -------------------
 # CONFIG / GLOBALS
