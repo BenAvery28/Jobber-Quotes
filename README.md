@@ -24,25 +24,64 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
 
 ##  Project Structure
 
-Jobber-Quotes/ 
-├─ config/          # Configuration files (API keys, settings, environment) 
 
-├─ docker/          # Dockerfile
-
-├─ src/             # Application source code  
-
-│   ├─ api/
-
-├─ docs/            # Public legal pages for API compliance
-
-│   ├─ privacy-policy.html
-
-│   └─ terms-of-service.html
-
-├─ README.md        # Project documentation
-
-└─ requirements.txt # Python dependencies
-
+│   .env
+│   .gitignore
+│   README.md
+│   requirements.txt
+│   run.py
+│
+├───.idea
+│   │   .gitignore
+│   │   Jobber Quotes.iml
+│   │   misc.xml
+│   │   modules.xml
+│   │   vcs.xml
+│   │   workspace.xml
+│   │
+│   └───inspectionProfiles
+│           profiles_settings.xml
+│
+├───config
+│   │   settings.py
+│   │   __init__.py
+│   │
+│   └───__pycache__
+│           settings.cpython-39.pyc
+│           __init__.cpython-39.pyc
+│
+├───docker
+│       docker-compose.yml
+│       Dockerfile
+│
+├───docs
+│       index.html
+│       privacy-policy.html
+│       terms-of-service.html
+│
+├───src
+│   │   main.py
+│   │   webapp.py
+│   │   __init__.py
+│   │
+│   ├───api
+│   │   │   jobber_client.py
+│   │   │   scheduler.py
+│   │   │   weather.py
+│   │   │   __init__.py
+│   │   │
+│   │   └───__pycache__
+│   │           jobber_client.cpython-39.pyc
+│   │           scheduler.cpython-39.pyc
+│   │           __init__.cpython-39.pyc
+│   │
+│   └───__pycache__
+│           main.cpython-39.pyc
+│           webapp.cpython-39.pyc
+│           __init__.cpython-39.pyc
+│
+└───testing
+        __init__.py
 
 ---
 
