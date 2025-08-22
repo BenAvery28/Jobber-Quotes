@@ -8,18 +8,11 @@
 # - Prepares data to send to Jobber
 
 from datetime import datetime, timedelta
-import random
 
 # 30-minute grace period between bookings
 WORK_START = 9  # 9 am
 WORK_END = 17  # 5 pm
 grace_period = timedelta(minutes=30)
-
-holidays = {
-    "2025-01-01": "New Year's Day",
-    "2025-07-01": "Canada Day",
-    "2025-12-25": "Christmas Day"
-}
 
 def is_workday(d):
     """
@@ -29,11 +22,8 @@ def is_workday(d):
     date_str = d.strftime("%Y-%m-%d")
 
     is_weekday = weekday < 5   # cause 5 and 6 are sat and sun !
-    not_holiday = date_str not in holidays
 
-    return is_weekday and not_holiday
-
-
+    return is_weekday
 
 def estimate_time(quote_cost: float):
     """
@@ -95,4 +85,3 @@ def auto_book(visits, start_date, duration):
 
         # next day
         d = (d + timedelta(days=1)).replace(hour=WORK_START, minute=0, second=0, microsecond=0)
-
