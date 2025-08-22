@@ -1,44 +1,17 @@
 # src/api/jobber_client.py
 #
 #   handles all interactions with Jobber’s GraphQL API
+#   now accepts access_token dynamically for OAuth
 
-import os
 import httpx
-from gql import gql, Client
-from gql.transport.requests import RequestsHTTPTransport
-from config.settings import JOBBER_API_KEY, JOBBER_API_BASE
 
-transport = RequestsHTTPTransport(
-    url=JOBBER_API_BASE + '/graphql',
-    headers={'Authorization': f'Bearer {JOBBER_API_KEY}'}
-)
-gql_client = Client(transport=transport, fetch_schema_from_transport=True)
 GQL_URL = "https://api.getjobber.com/api/graphql"
 
-def get_quote(quote_id):
-    query = gql('''
-    query GetQuote($id: ID!) {
-        quote(id: $id) {
-            id
-            client { emails { address } properties { city } }
-            amounts { totalPrice }
-        }
-    }
-    ''')
-    return gql_client.execute(query, variable_values={'id': quote_id})
 
-def approve_quote(quote_id):
-    mutation = gql('''
-    mutation ApproveQuote($id: ID!) {
-        quoteApprove(id: $id) {
-            quote { id status }
-            userErrors { message }
-        }
-    }
-    ''')
-    return gql_client.execute(mutation, variable_values={'id': quote_id})
-
-async def create_job(title, start_iso, end_iso, job_type, notes=""):
+async def create_job(title, start_iso, end_iso, access_token):
+    """
+    Create a new job in Jobber
+    """
     mutation = {
         "query": """
         mutation CreateJob($input: CreateJobInput!) {
@@ -51,20 +24,20 @@ async def create_job(title, start_iso, end_iso, job_type, notes=""):
                 "title": title,
                 "startAt": start_iso,
                 "endAt": end_iso,
-                "notes": notes
             }
         }
     }
+
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(
             GQL_URL,
             json=mutation,
-            headers={"Authorization": f"Bearer {JOBBER_API_KEY}"}
+            headers={"Authorization": f"Bearer {access_token}"}
         )
     return r.json()
 
 
-async def notify_team(job_id, message):
+async def notify_team(job_id, message, access_token):
     """Send a message to assigned staff for a job"""
     mutation = {
         "query": """
@@ -75,18 +48,18 @@ async def notify_team(job_id, message):
         }""",
         "variables": {"id": job_id, "input": {"notes": message}}
     }
+
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(
             GQL_URL,
             json=mutation,
-            headers={"Authorization": f"Bearer {JOBBER_API_KEY}"}
+            headers={"Authorization": f"Bearer {access_token}"}
         )
     return r.json()
 
 
-async def notify_client(job_id, message):
+async def notify_client(job_id, message, access_token):
     """Send a custom message to the client"""
-    # Jobber lets you update clientNotes or send messages via jobUpdate
     mutation = {
         "query": """
         mutation JobUpdate($id: ID!, $input: UpdateJobInput!) {
@@ -96,10 +69,50 @@ async def notify_client(job_id, message):
         }""",
         "variables": {"id": job_id, "input": {"clientNotes": message}}
     }
+
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(
             GQL_URL,
             json=mutation,
-            headers={"Authorization": f"Bearer {JOBBER_API_KEY}"}
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+    return r.json()
+
+
+async def get_quote(quote_id, access_token):
+    """Fetch a quote by ID"""
+    query = """
+    query GetQuote($id: ID!) {
+        quote(id: $id) {
+            id
+            client { emails { address } properties { city } }
+            amounts { totalPrice }
+        }
+    }
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            GQL_URL,
+            json={"query": query, "variables": {"id": quote_id}},
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+    return r.json()
+
+
+async def approve_quote(quote_id, access_token):
+    """Approve a quote"""
+    mutation = """
+    mutation ApproveQuote($id: ID!) {
+        quoteApprove(id: $id) {
+            quote { id status }
+            userErrors { message }
+        }
+    }
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            GQL_URL,
+            json={"query": mutation, "variables": {"id": quote_id}},
+            headers={"Authorization": f"Bearer {access_token}"}
         )
     return r.json()
