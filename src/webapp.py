@@ -47,27 +47,25 @@ async def book_job_endpoint(request: Request):
     {
         "title": "Window Cleaning",
         "duration_hours": 2.5,
-        "job_type": "res"
     }
     """
     try:
         data = await request.json()
         title = data["title"]
         duration_hours = float(data["duration_hours"])
-        job_type = data.get("job_type", "res")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
 
     # scheduler determines next start time
     duration = timedelta(hours=int(duration_hours), minutes=(duration_hours % 1) * 60)
-    start_slot_iso = auto_book(VISITS, duration, job_type)
+    start_slot_iso = auto_book(VISITS, duration)
     end_slot_iso = (datetime.fromisoformat(start_slot_iso) + duration).isoformat()
 
     # record the visit in-memory
     VISITS.append({"startAt": start_slot_iso, "endAt": end_slot_iso})
 
     # 1. create the Job in Jobber
-    job_response = await create_job(title, start_slot_iso, end_slot_iso, job_type)
+    job_response = await create_job(title, start_slot_iso, end_slot_iso)
     try:
         job_id = job_response["data"]["jobCreate"]["job"]["id"]
     except KeyError:

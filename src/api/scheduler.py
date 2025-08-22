@@ -10,9 +10,6 @@
 from datetime import datetime, timedelta
 import random
 
-# tags representing job types (residential/commercial/other)
-job_tags = ['res', 'com', 'other']
-
 # 30-minute grace period between bookings
 WORK_START = 9  # 9 am
 WORK_END = 17  # 5 pm
@@ -36,6 +33,32 @@ def is_workday(d):
 
     return is_weekday and not_holiday
 
+
+
+def estimate_time(quote_cost: float):
+    """
+    Estimate job time based on quote cost.
+    Rules:
+      - Full day = $1440 = 8 hours
+      - 4-hour chunk = $720
+      - Hourly crew rate = $180
+    """
+    if quote_cost <= 0:
+        return -1  # invalid quote
+
+    # try to use full days
+    days = quote_cost // 1440
+    remainder = quote_cost % 1440
+
+    # try 4-hour chunks
+    chunks = remainder // 720
+    remainder = remainder % 720
+
+    # hourly
+    hours = remainder / 180   # remainder should always be divisible by 180 cleanly
+
+    return timedelta(days=int(days), hours=int(chunks * 4 + hours))
+
 def check_availability(visits, start_time, duration):
     """
     Check if a time slot is available, considering grace periods.
@@ -49,33 +72,27 @@ def check_availability(visits, start_time, duration):
             return False
     return True
 
-def auto_book(visits, start_date, duration, job_type="res"):
+def auto_book(visits, start_date, duration):
     """
-    Find the next available time slot for a job and return it as a string (ISO format).
-    - visits: list of dicts with 'startAt' and 'endAt' (ISO strings)
-    - start_date: datetime to begin searching from
-    - duration: timedelta for job length
-    - job_type: 'res', 'com', or 'other' (future flexibility)
+    Find the next available time slot for a job.
+    Returns dict with ISO strings for start and end.
     """
-
-    # step through each day from start_date onward
     d = start_date.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
 
     while True:
-        # valid workday
         if is_workday(d):
             day_start = d.replace(hour=WORK_START, minute=0)
             day_end = d.replace(hour=WORK_END, minute=0)
 
-            # start at 9am and move in 30-minute increments
             slot = day_start
             while slot + duration <= day_end:
                 if check_availability(visits, slot, duration):
-                    # found a valid slot → return as ISO string
-                    return slot.isoformat()
+                    return {
+                        "startAt": slot.isoformat(),
+                        "endAt": (slot + duration).isoformat(),
+                    }
+                slot += timedelta(minutes=30)
 
-                slot += timedelta(minutes=30)  # try next half-hour slot
-
-        # move to the next day 9 am
+        # next day
         d = (d + timedelta(days=1)).replace(hour=WORK_START, minute=0, second=0, microsecond=0)
 

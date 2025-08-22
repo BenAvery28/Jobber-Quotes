@@ -8,7 +8,7 @@ httpx
 # GraphQL client
 gql[all]==3.5.0
 
-# Requests is optionalpip install -r requirements.txt
+# Requests is optional pip install -r requirements.txt
 
 requests==2.31.0
 
