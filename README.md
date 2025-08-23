@@ -23,66 +23,59 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
 ---
 
 ##  Project Structure
+This is the organized layout of the repository, showcasing all files and directories used in the project.
+
+# Shimmer & Shine – Jobber Quotes AI Scheduler
 
 
-│   .env
-│   .gitignore
-│   README.md
-│   requirements.txt
-│   run.py
-│
-├───.idea
-│   │   .gitignore
-│   │   Jobber Quotes.iml
-│   │   misc.xml
-│   │   modules.xml
-│   │   vcs.xml
-│   │   workspace.xml
-│   │
-│   └───inspectionProfiles
-│           profiles_settings.xml
-│
-├───config
-│   │   settings.py
-│   │   __init__.py
-│   │
-│   └───__pycache__
-│           settings.cpython-39.pyc
-│           __init__.cpython-39.pyc
-│
-├───docker
-│       docker-compose.yml
-│       Dockerfile
-│
-├───docs
-│       index.html
-│       privacy-policy.html
-│       terms-of-service.html
-│
-├───src
-│   │   main.py
-│   │   webapp.py
-│   │   __init__.py
-│   │
-│   ├───api
-│   │   │   jobber_client.py
-│   │   │   scheduler.py
-│   │   │   weather.py
-│   │   │   __init__.py
-│   │   │
-│   │   └───__pycache__
-│   │           jobber_client.cpython-39.pyc
-│   │           scheduler.cpython-39.pyc
-│   │           __init__.cpython-39.pyc
-│   │
-│   └───__pycache__
-│           main.cpython-39.pyc
-│           webapp.cpython-39.pyc
-│           __init__.cpython-39.pyc
-│
-└───testing
-        __init__.py
 
+- 📁 **Root Directory**
+  - `.env` (Environment variables)
+  - `.gitignore` (Ignored files)
+  - `README.md` (You're here!)
+  - `requirements.txt` (Dependencies)
+  - `run.py` (Run script)
+  - 📁 **.idea** (PyCharm configuration)
+    - `.gitignore`
+    - `Jobber Quotes.iml`
+    - `misc.xml`
+    - `modules.xml`
+    - `vcs.xml`
+    - `workspace.xml`
+    - 📁 **inspectionProfiles**
+      - `profiles_settings.xml`
+  - 📁 **config** (Configuration files)
+    - `settings.py`
+    - `init.py`
+    - 📁 **__pycache__**
+      - `settings.cpython-39.pyc`
+      - `init.cpython-39.pyc`
+  - 📁 **docker** (Docker setup)
+    - `docker-compose.yml`
+    - `Dockerfile`
+  - 📁 **docs** (Documentation and legal pages)
+    - `index.html`
+    - `privacy-policy.html`
+    - `terms-of-service.html`
+  - 📁 **src** (Source code)
+    - `main.py`
+    - `webapp.py`
+    - `init.py`
+    - 📁 **api** (API modules)
+      - `jobber_client.py`
+      - `scheduler.py`
+      - `weather.py`
+      - `init.py`
+      - 📁 **__pycache__**
+        - `jobber_client.cpython-39.pyc`
+        - `scheduler.cpython-39.pyc`
+        - `init.cpython-39.pyc`
+    - 📁 **__pycache__**
+      - `main.cpython-39.pyc`
+      - `webapp.cpython-39.pyc`
+      - `init.cpython-39.pyc`
+  - 📁 **testing** (Test files)
+    - `init.py`
 ---
 
 ##  Tech Stack  
