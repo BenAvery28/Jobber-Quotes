@@ -7,7 +7,6 @@ import httpx
 
 GQL_URL = "https://api.getjobber.com/api/graphql"
 
-
 async def create_job(title, start_iso, end_iso, access_token):
     """
     Create a new job in Jobber
@@ -37,6 +36,7 @@ async def create_job(title, start_iso, end_iso, access_token):
     return r.json()
 
 
+
 async def notify_team(job_id, message, access_token):
     """Send a message to assigned staff for a job"""
     mutation = {
@@ -58,6 +58,7 @@ async def notify_team(job_id, message, access_token):
     return r.json()
 
 
+# there is already a pre-made message in jobber we just have to trigger it through API
 async def notify_client(job_id, message, access_token):
     """Send a custom message to the client"""
     mutation = {
@@ -77,6 +78,7 @@ async def notify_client(job_id, message, access_token):
             headers={"Authorization": f"Bearer {access_token}"}
         )
     return r.json()
+
 
 
 async def get_quote(quote_id, access_token):
@@ -99,20 +101,3 @@ async def get_quote(quote_id, access_token):
     return r.json()
 
 
-async def approve_quote(quote_id, access_token):
-    """Approve a quote"""
-    mutation = """
-    mutation ApproveQuote($id: ID!) {
-        quoteApprove(id: $id) {
-            quote { id status }
-            userErrors { message }
-        }
-    }
-    """
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            GQL_URL,
-            json={"query": mutation, "variables": {"id": quote_id}},
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-    return r.json()

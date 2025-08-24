@@ -1,5 +1,6 @@
 # src/webapp.py
-# FastAPI server for 24/7 job scheduling using Jobber OAuth
+#
+#   FastAPI server for 24/7 job scheduling using Jobber OAuth
 
 import os
 from fastapi import FastAPI, HTTPException, Request
