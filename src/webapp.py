@@ -70,7 +70,7 @@ async def oauth_callback(request: Request):
             },
         )
         token_data = r.json()
-
+        TOKENS.update(token_data)
     return HTMLResponse(f"<h1>Access Token</h1><pre>{token_data}</pre>")
 
 
@@ -97,14 +97,16 @@ async def whoami():
 # -------------------
 # MAIN WEBHOOK ENDPOINT
 # -------------------
-@app.post("/book-job")
-async def book_job_endpoint(request: Request):
+@app.post("/webhook")
+async def webhook(request: Request):
     """
-    Event-driven webhook for quote approvals.
-    Payload example:
+    Handle webhook events from Jobber, detecting approved quotes and starting the flow.
+    Expected payload example (based on Jobber webhook schema):
     {
-        "title": "Window Cleaning",
-        "duration_hours": 2.5,
+        "data": {
+            "id": "Q123",
+            "quoteStatus": "APPROVED"
+        }
     }
     """
     access = TOKENS.get("access_token")
@@ -112,36 +114,43 @@ async def book_job_endpoint(request: Request):
         raise HTTPException(status_code=401, detail="Not authorized")
 
     try:
-        data = await request.json()
-        title = data["title"]
-        duration_hours = float(data["duration_hours"])
+        payload = await request.json()
+        quote_id = payload.get('data', {}).get('id')
+        status = payload.get('data', {}).get('quoteStatus')
+        if not quote_id or not status:
+            raise ValueError("Missing quote ID or status")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
 
-    # scheduler determines next start time
-    duration = timedelta(hours=int(duration_hours), minutes=(duration_hours % 1) * 60)
-    start_slot_iso = auto_book(VISITS, datetime.now(), duration)
-    end_slot_iso = (datetime.fromisoformat(start_slot_iso) + duration).isoformat()
+    if status != "APPROVED":
+        return JSONResponse({"status": "Ignored - Not an approved quote"})
 
-    # record the visit in-memory
-    VISITS.append({"startAt": start_slot_iso, "endAt": end_slot_iso})
+    # Mock quote data for now (replace with real get_quote later)
+    quote = generate_mock_quote(quote_id)
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote {quote_id} not found")
 
-    # 1. create the Job in Jobber
-    job_response = await create_job(title, start_slot_iso, end_slot_iso, access_token=access)
-    try:
-        job_id = job_response["data"]["jobCreate"]["job"]["id"]
-    except KeyError:
-        raise HTTPException(status_code=500, detail=f"Failed to create job: {job_response}")
+    # Approve the quote (mocked for now)
+    approval_result = approve_quote(quote_id)
+    if approval_result.get('quoteApprove', {}).get('userErrors'):
+        raise HTTPException(status_code=500, detail=f"Approval failed: {approval_result['quoteApprove']['userErrors']}")
 
-    # 2. notify team
-    await notify_team(job_id, f"Job scheduled: {title} at {start_slot_iso}", access_token=access)
+    # Extract estimated duration from quote (mocked)
+    estimated_duration = quote.get('estimatedDuration', timedelta(hours=2))
+    start_slot = auto_book(VISITS, datetime.now(), estimated_duration)
+    if not start_slot:
+        raise HTTPException(status_code=400, detail="No available slot")
 
-    # 3. notify client
-    await notify_client(job_id, f"Your job '{title}' is booked for {start_slot_iso} to {end_slot_iso}", access_token=access)
+    end_slot = (datetime.fromisoformat(start_slot) + estimated_duration).isoformat()
+    VISITS.append({"startAt": start_slot, "endAt": end_slot})
+
+    # Notify team and client (mocked for now, awaiting real API)
+    # await notify_team(quote_id, f"Job scheduled: Quote {quote_id} at {start_slot}", access_token=access)
+    # await notify_client(quote_id, f"Your job is booked for {start_slot} to {end_slot}", access_token=access)
 
     return JSONResponse({
-        "scheduled_start": start_slot_iso,
-        "scheduled_end": end_slot_iso,
-        "job_id": job_id,
+        "status": f"Quote {quote_id} approved and scheduled",
+        "scheduled_start": start_slot,
+        "scheduled_end": end_slot,
         "visits_count": len(VISITS)
     })
