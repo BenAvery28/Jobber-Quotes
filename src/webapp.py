@@ -135,6 +135,9 @@ async def webhook(request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
 
+    # debugging
+    #print("Webhook received request")
+
     if status != "APPROVED":
         return JSONResponse({"status": "Ignored - Not an approved quote"})
 

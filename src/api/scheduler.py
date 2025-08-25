@@ -65,15 +65,14 @@ def check_availability(visits, start_time, duration):
 
 def auto_book(visits, start_date, duration, city):
     """
-    Find the next available time slot for a job.
+    Find the next available time slot for a job, checking weather conditions.
     Returns dict with ISO strings for start and end.
     """
     d = start_date.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
 
     while True:
         if is_workday(d):
-            # Check weather for the day
-            if check_weather(city, d):
+            if check_weather(city, d, WORK_START, WORK_END):
                 day_start = d.replace(hour=WORK_START, minute=0)
                 day_end = d.replace(hour=WORK_END, minute=0)
 
@@ -86,5 +85,4 @@ def auto_book(visits, start_date, duration, city):
                         }
                     slot += timedelta(minutes=30)
 
-        # Next day
         d = (d + timedelta(days=1)).replace(hour=WORK_START, minute=0, second=0, microsecond=0)
