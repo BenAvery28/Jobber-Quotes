@@ -33,6 +33,7 @@ def generate_mock_webhook(quote_id=None):
         "data": {
             "id": quote_id,
             "quoteStatus": status,
-            "amounts": {"totalPrice": 500.00}
+            "amounts": {"totalPrice": 500.00},
+            "client": {"properties": [{"city": "Saskatoon"}]}
         }
     }

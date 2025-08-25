@@ -41,10 +41,3 @@ def check_weather(city, date):
                 return False
             return True
     return False
-
-
-
-# a test fucntion
-if __name__ == "__main__":
-    result = check_weather("Saskatoon", datetime.now())
-    print(f"Weather suitable: {result}")

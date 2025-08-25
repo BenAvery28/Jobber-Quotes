@@ -8,6 +8,7 @@
 # - Prepares data to send to Jobber
 
 from datetime import datetime, timedelta
+from src.api.weather import check_weather
 
 # 30-minute grace period between bookings
 WORK_START = 9  # 9 am
@@ -62,7 +63,7 @@ def check_availability(visits, start_time, duration):
             return False
     return True
 
-def auto_book(visits, start_date, duration):
+def auto_book(visits, start_date, duration, city):
     """
     Find the next available time slot for a job.
     Returns dict with ISO strings for start and end.
@@ -71,17 +72,19 @@ def auto_book(visits, start_date, duration):
 
     while True:
         if is_workday(d):
-            day_start = d.replace(hour=WORK_START, minute=0)
-            day_end = d.replace(hour=WORK_END, minute=0)
+            # Check weather for the day
+            if check_weather(city, d):
+                day_start = d.replace(hour=WORK_START, minute=0)
+                day_end = d.replace(hour=WORK_END, minute=0)
 
-            slot = day_start
-            while slot + duration <= day_end:
-                if check_availability(visits, slot, duration):
-                    return {
-                        "startAt": slot.isoformat(),
-                        "endAt": (slot + duration).isoformat(),
-                    }
-                slot += timedelta(minutes=30)
+                slot = day_start
+                while slot + duration <= day_end:
+                    if check_availability(visits, slot, duration):
+                        return {
+                            "startAt": slot.isoformat(),
+                            "endAt": (slot + duration).isoformat(),
+                        }
+                    slot += timedelta(minutes=30)
 
-        # next day
+        # Next day
         d = (d + timedelta(days=1)).replace(hour=WORK_START, minute=0, second=0, microsecond=0)

@@ -148,12 +148,15 @@ async def webhook(request: Request):
     if estimated_duration == -1:
         raise HTTPException(status_code=400, detail="Invalid quote cost")
 
-    # find the next available slot
+    # find the next available slot with weather check
     start_datetime = datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
     while not is_workday(start_datetime):
         start_datetime += timedelta(days=1)
 
-    slot = auto_book(VISITS, start_datetime, estimated_duration)
+    # lol
+    city = "Saskatoon"
+
+    slot = auto_book(VISITS, start_datetime, estimated_duration, city)
     if not slot:
         raise HTTPException(status_code=400, detail="No available slot")
 
