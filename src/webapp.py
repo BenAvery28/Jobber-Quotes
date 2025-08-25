@@ -13,6 +13,9 @@ from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_K
 import secrets
 from fastapi.responses import HTMLResponse
 from testing.mock_data import generate_mock_webhook
+from src.db import init_db, get_visits, add_visit
+
+init_db()
 
 
 # -------------------

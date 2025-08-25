@@ -9,6 +9,7 @@
 
 from datetime import datetime, timedelta
 from src.api.weather import check_weather
+from src.db import get_visits, add_visit
 
 # 30-minute grace period between bookings
 WORK_START = 9  # 9 am
@@ -50,24 +51,16 @@ def estimate_time(quote_cost: float):
 
     return timedelta(days=int(days), hours=int(chunks * 4 + hours))
 
-def check_availability(visits, start_time, duration):
-    """
-    Check if a time slot is available, considering grace periods.
-    visits = list of dicts with 'startAt' and 'endAt' in ISO 8601 format.
-    """
+def check_availability(start_time, duration):
     end_time = start_time + duration
-    for visit in visits:
-        visit_start = datetime.fromisoformat(visit['startAt']) - grace_period
-        visit_end = datetime.fromisoformat(visit['endAt']) + grace_period
+    for visit in get_visits():
+        visit_start = datetime.fromisoformat(visit['start_at']) - grace_period
+        visit_end = datetime.fromisoformat(visit['end_at']) + grace_period
         if not (end_time <= visit_start or start_time >= visit_end):
             return False
     return True
 
-def auto_book(visits, start_date, duration, city):
-    """
-    Find the next available time slot for a job, checking weather conditions.
-    Returns dict with ISO strings for start and end.
-    """
+def auto_book(start_date, duration, city):
     d = start_date.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
 
     while True:
@@ -75,14 +68,13 @@ def auto_book(visits, start_date, duration, city):
             if check_weather(city, d, WORK_START, WORK_END):
                 day_start = d.replace(hour=WORK_START, minute=0)
                 day_end = d.replace(hour=WORK_END, minute=0)
-
                 slot = day_start
                 while slot + duration <= day_end:
-                    if check_availability(visits, slot, duration):
-                        return {
-                            "startAt": slot.isoformat(),
-                            "endAt": (slot + duration).isoformat(),
-                        }
+                    if check_availability(slot, duration):
+                        start_at = slot.isoformat()
+                        end_at = (slot + duration).isoformat()
+                        add_visit(start_at, end_at)
+                        return {"startAt": start_at, "endAt": end_at}
                     slot += timedelta(minutes=30)
 
         d = (d + timedelta(days=1)).replace(hour=WORK_START, minute=0, second=0, microsecond=0)
