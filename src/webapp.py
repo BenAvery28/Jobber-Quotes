@@ -113,7 +113,7 @@ async def webhook(request: Request):
     }
     """
     # we dont have this for testing cause the oauth flow isnt setup so commenteds out for now
-    #access = TOKENS.get("access_token")
+    access = TOKENS.get("access_token")
     #if not access:
         #raise HTTPException(status_code=401, detail="Not authorized")
 
@@ -164,14 +164,17 @@ async def webhook(request: Request):
     end_slot = slot["endAt"]
     VISITS.append({"startAt": start_slot, "endAt": end_slot})
 
-    # Notify team and client (mocked for now, awaiting real API)
-    # await notify_team(quote_id, f"Job scheduled: Quote {quote_id} at {start_slot}", access_token=access)
-    # await notify_client(quote_id, f"Your job is booked for {start_slot} to {end_slot}", access_token=access)
+    # create job in jobber  calendar and notify team + client
+    job_response = await create_job(f"Quote {quote_id}", start_slot, end_slot, access_token=access)
+    job_id = job_response["data"]["jobCreate"]["job"]["id"]
+    await notify_team(job_id, f"Job scheduled: Quote {quote_id} at {start_slot}", access_token=access)
+    await notify_client(job_id, f"Your job is booked for {start_slot} to {end_slot}", access_token=access)
 
     return JSONResponse({
         "status": f"Quote {quote_id} approved and scheduled",
         "scheduled_start": start_slot,
         "scheduled_end": end_slot,
         "visits_count": len(VISITS),
-        "cost": cost
+        "cost": cost,
+        "job_id": job_id
     })

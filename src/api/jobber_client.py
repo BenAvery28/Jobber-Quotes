@@ -3,101 +3,124 @@
 #   handles all interactions with Jobber’s GraphQL API
 #   now accepts access_token dynamically for OAuth
 
-import httpx
+from gql import gql, Client
+from gql.transport.requests import RequestsHTTPTransport
+from config.settings import JOBBER_API_BASE, JOBBER_API_KEY
+import asyncio
+from datetime import datetime
 
-GQL_URL = "https://api.getjobber.com/api/graphql"
+# Mock setup (replace with real OAuth token and API base when available)
+ACCESS_TOKEN = "mock_token"  # From TOKENS in webapp.py
+transport = RequestsHTTPTransport(
+    url=JOBBER_API_BASE + '/graphql',
+    headers={'Authorization': f'Bearer {ACCESS_TOKEN}'}
+)
+gql_client = Client(transport=transport, fetch_schema_from_transport=True)
 
-async def create_job(title, start_iso, end_iso, access_token):
+async def create_job(title, start_slot, end_slot, access_token):
     """
-    Create a new job in Jobber
+    Create a job in the Jobber calendar with the scheduled info.
+    Args:
+        title (str): Job title.
+        start_slot (str): ISO 8601 start time.
+        end_slot (str): ISO 8601 end time.
+        access_token (str): OAuth token for authentication.
+    Returns:
+        dict: Mock response with job details based on Job type.
     """
-    mutation = {
-        "query": """
-        mutation CreateJob($input: CreateJobInput!) {
-          jobCreate(input: $input) {
-            job { id title startAt endAt }
-          }
-        }""",
-        "variables": {
-            "input": {
-                "title": title,
-                "startAt": start_iso,
-                "endAt": end_iso,
+    # GraphQL mutation based on Jobber schema
+    mutation = gql("""
+        mutation CreateJob($input: JobCreateInput!) {
+            jobCreate(input: $input) {
+                job {
+                    id
+                    title
+                    startAt
+                    endAt
+                    client {
+                        id
+                        name
+                    }
+                    property {
+                        id
+                    }
+                }
+                userErrors { message }
+            }
+        }
+    """)
+    # Mock input data (replace with real client/property IDs later)
+    input_data = {
+        "input": {
+            "title": title,
+            "startAt": start_slot,
+            "endAt": end_slot,
+            "clientId": "C123",  # Mock client ID
+            "propertyId": "P123"  # Mock property ID
+        }
+    }
+    # Simulate API call
+    await asyncio.sleep(0.1)  # Mock delay
+    return {
+        "data": {
+            "jobCreate": {
+                "job": {
+                    "id": f"J{title.replace(' ', '_')}",
+                    "title": title,
+                    "startAt": start_slot,
+                    "endAt": end_slot,
+                    "client": {"id": "C123", "name": "Test Client"},
+                    "property": {"id": "P123"}
+                },
+                "userErrors": []
             }
         }
     }
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            GQL_URL,
-            json=mutation,
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-    return r.json()
-
-
-
 async def notify_team(job_id, message, access_token):
-    """Send a message to assigned staff for a job"""
-    mutation = {
-        "query": """
-        mutation JobUpdate($id: ID!, $input: UpdateJobInput!) {
-          jobUpdate(id: $id, input: $input) {
-            job { id notes }
-          }
-        }""",
-        "variables": {"id": job_id, "input": {"notes": message}}
-    }
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            GQL_URL,
-            json=mutation,
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-    return r.json()
-
-
-# there is already a pre-made message in jobber we just have to trigger it through API
-async def notify_client(job_id, message, access_token):
-    """Send a custom message to the client"""
-    mutation = {
-        "query": """
-        mutation JobUpdate($id: ID!, $input: UpdateJobInput!) {
-          jobUpdate(id: $id, input: $input) {
-            job { id clientNotes }
-          }
-        }""",
-        "variables": {"id": job_id, "input": {"clientNotes": message}}
-    }
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            GQL_URL,
-            json=mutation,
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-    return r.json()
-
-
-
-async def get_quote(quote_id, access_token):
-    """Fetch a quote by ID"""
-    query = """
-    query GetQuote($id: ID!) {
-        quote(id: $id) {
-            id
-            client { emails { address } properties { city } }
-            amounts { totalPrice }
-        }
-    }
     """
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            GQL_URL,
-            json={"query": query, "variables": {"id": quote_id}},
-            headers={"Authorization": f"Bearer {access_token}"}
-        )
-    return r.json()
+    Notify the team via Jobber messaging.
+    Args:
+        job_id (str): ID of the job to notify about.
+        message (str): Message content.
+        access_token (str): OAuth token for authentication.
+    Returns:
+        dict: Mock response indicating success.
+    """
+    # Mock GraphQL mutation (real schema TBD)
+    mutation = gql("""
+        mutation NotifyTeam($input: NotifyInput!) {
+            notifyTeam(input: $input) {
+                success
+                message
+            }
+        }
+    """)
+    input_data = {"input": {"jobId": job_id, "message": message}}
+    await asyncio.sleep(0.1)  # Mock delay
+    return {"success": True, "message": f"Team notified for job {job_id}"}
+
+async def notify_client(job_id, message, access_token):
+    """
+    Notify the client via Jobber messaging.
+    Args:
+        job_id (str): ID of the job to notify about.
+        message (str): Message content.
+        access_token (str): OAuth token for authentication.
+    Returns:
+        dict: Mock response indicating success.
+    """
+    # Mock GraphQL mutation (real schema TBD)
+    mutation = gql("""
+        mutation NotifyClient($input: NotifyInput!) {
+            notifyClient(input: $input) {
+                success
+                message
+            }
+        }
+    """)
+    input_data = {"input": {"jobId": job_id, "message": message}}
+    await asyncio.sleep(0.1)  # Mock delay
+    return {"success": True, "message": f"Client notified for job {job_id}"}
 
 
