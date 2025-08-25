@@ -7,11 +7,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 import httpx
 from datetime import datetime, timedelta
-from src.api.scheduler import auto_book
+from src.api.scheduler import auto_book, is_workday, estimate_time
 from src.api.jobber_client import create_job, notify_team, notify_client
 from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_KEY
 import secrets
 from fastapi.responses import HTMLResponse
+from testing.mock_data import generate_mock_webhook
+
 
 # -------------------
 # CONFIG / GLOBALS
@@ -105,43 +107,58 @@ async def webhook(request: Request):
     {
         "data": {
             "id": "Q123",
-            "quoteStatus": "APPROVED"
+            "quoteStatus": "APPROVED",
+            "amounts": {"totalPrice": 500.00}
         }
     }
     """
-    access = TOKENS.get("access_token")
-    if not access:
-        raise HTTPException(status_code=401, detail="Not authorized")
+    # we dont have this for testing cause the oauth flow isnt setup so commenteds out for now
+    #access = TOKENS.get("access_token")
+    #if not access:
+        #raise HTTPException(status_code=401, detail="Not authorized")
 
     try:
         payload = await request.json()
-        quote_id = payload.get('data', {}).get('id')
-        status = payload.get('data', {}).get('quoteStatus')
-        if not quote_id or not status:
-            raise ValueError("Missing quote ID or status")
+        webhook_data = generate_mock_webhook()  # generating mock data for testing
+
+        quote_id = webhook_data.get('data', {}).get('id')
+        status = webhook_data.get('data', {}).get('quoteStatus')
+        cost = webhook_data.get('data', {}).get('amounts', {}).get('totalPrice')
+
+        # checks
+        if not quote_id:
+            raise ValueError("Missing quote ID")
+        elif not status:
+            raise ValueError("Missing status")
+        elif not cost:
+            raise ValueError("Missing Cost")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
 
     if status != "APPROVED":
         return JSONResponse({"status": "Ignored - Not an approved quote"})
 
-    # Mock quote data for now (replace with real get_quote later)
-    quote = generate_mock_quote(quote_id)
+    # mock quote data for now until real API access
+    quote = generate_mock_webhook(quote_id)
     if not quote:
         raise HTTPException(status_code=404, detail=f"Quote {quote_id} not found")
 
-    # Approve the quote (mocked for now)
-    approval_result = approve_quote(quote_id)
-    if approval_result.get('quoteApprove', {}).get('userErrors'):
-        raise HTTPException(status_code=500, detail=f"Approval failed: {approval_result['quoteApprove']['userErrors']}")
+    # estimate duration based on cost using scheduler's function
+    estimated_duration = estimate_time(cost) if cost is not None and cost > 0 else timedelta(hours=2)
+    if estimated_duration == -1:
+        raise HTTPException(status_code=400, detail="Invalid quote cost")
 
-    # Extract estimated duration from quote (mocked)
-    estimated_duration = quote.get('estimatedDuration', timedelta(hours=2))
-    start_slot = auto_book(VISITS, datetime.now(), estimated_duration)
-    if not start_slot:
+    # find the next available slot
+    start_datetime = datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
+    while not is_workday(start_datetime):
+        start_datetime += timedelta(days=1)
+
+    slot = auto_book(VISITS, start_datetime, estimated_duration)
+    if not slot:
         raise HTTPException(status_code=400, detail="No available slot")
 
-    end_slot = (datetime.fromisoformat(start_slot) + estimated_duration).isoformat()
+    start_slot = slot["startAt"]
+    end_slot = slot["endAt"]
     VISITS.append({"startAt": start_slot, "endAt": end_slot})
 
     # Notify team and client (mocked for now, awaiting real API)
@@ -152,5 +169,6 @@ async def webhook(request: Request):
         "status": f"Quote {quote_id} approved and scheduled",
         "scheduled_start": start_slot,
         "scheduled_end": end_slot,
-        "visits_count": len(VISITS)
+        "visits_count": len(VISITS),
+        "cost": cost
     })
