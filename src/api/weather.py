@@ -6,6 +6,7 @@ import requests
 from datetime import datetime
 from config.settings import OPENWEATHER_API_KEY
 
+
 def check_weather(city, date, start_hour=9, end_hour=17):
     """
     Check if weather conditions are suitable for a job on a given date and time range.
@@ -18,7 +19,7 @@ def check_weather(city, date, start_hour=9, end_hour=17):
         end_hour (int): End hour (default 5 PM).
     """
     # DEbug
-    print(f"Checking weather for {city} on {date.date()} from {start_hour}:00 to {end_hour}:00")
+    # print(f"Checking weather for {city} on {date.date()} from {start_hour}:00 to {end_hour}:00")
 
     # Default to Saskatoon, SK, CA
     state_code = "SK"
@@ -32,32 +33,32 @@ def check_weather(city, date, start_hour=9, end_hour=17):
         geo_resp = requests.get(geo_url, params=geo_params, timeout=5).json()
 
         # debug
-        print(f"Geocoding response: {geo_resp}")
+        # print(f"Geocoding response: {geo_resp}")
 
         if not geo_resp:
-            print("No geocoding data found")
+            # print("No geocoding data found")
             return False
         lat, lon = geo_resp[0]["lat"], geo_resp[0]["lon"]
     except Exception as e:
-        print(f"Geocoding error: {e}")
+        # print(f"Geocoding error: {e}")
         return False
 
     hourly_url = "https://pro.openweathermap.org/data/2.5/forecast/hourly"
     params = {"lat": lat, "lon": lon, "appid": OPENWEATHER_API_KEY, "units": "metric"}
     try:
         forecast = requests.get(hourly_url, params=params, timeout=5).json()
-        print(f"Hourly forecast response: {forecast}")  # Debug
+        # print(f"Hourly forecast response: {forecast}")  # Debug
         target_date = date.date()
         for item in forecast.get("list", []):
             forecast_time = datetime.fromtimestamp(item["dt"]).replace(tzinfo=None)  # Remove tz for comparison
             if forecast_time.date() == target_date and start_hour <= forecast_time.hour < end_hour:
                 weather = item["weather"][0]["main"]
                 pop = item.get("pop", 0)  # probability of precipitation (0–1)
-                print(f"Hour {forecast_time.hour}: Weather: {weather}, POP: {pop}")
+                # print(f"Hour {forecast_time.hour}: Weather: {weather}, POP: {pop}")
                 if weather in ["Snow", "Thunderstorm"] or pop > 0.5:
                     return False
-        print("All hours suitable or no data for range")
+        # print("All hours suitable or no data for range")
         return True
     except Exception as e:
-        print(f"Forecast error: {e}")
+        # print(f"Forecast error: {e}")
         return False
