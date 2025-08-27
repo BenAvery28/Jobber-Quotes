@@ -5,7 +5,9 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # loads .env into environment
+#added print for testing purposes
+print(str(load_dotenv()) + " environment var has been loaded (for testing)") # loads .env into environment
+
 
 # loading jobber stuff
 JOBBER_CLIENT_ID = os.getenv("JOBBER_CLIENT_ID")
