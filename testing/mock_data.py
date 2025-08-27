@@ -47,12 +47,19 @@ def generate_mock_visits(count=5):
 
 def generate_mock_webhook(quote_id=None):
     """
-
+    Generate a mock webhook payload similar to what jobber sends when a quote is approved
+    returns:
+    dict containing>
+        - id: "Q123" (default)
+        - quoteStatus: "APPROVED"
+        - amounts: totalPrice fixed at 500.00
+        - client: mock property with city "Saskatoon"
     """
 
     if quote_id is None or quote_id != "Q123":
         quote_id = "Q123"
     status = "APPROVED"
+
     return {
         "data": {
             "id": quote_id,
