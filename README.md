@@ -22,11 +22,8 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
 
 ---
 
-##  Project Structure
-This is the organized layout of the repository, showcasing all files and directories used in the project.
-
-# Shimmer & Shine – Jobber Quotes AI Scheduler
-
+## Project Structure
+### This is the organized layout of the repository, showcasing all files and directories used in the project.
 
 
 - 📁 **Root Directory**
@@ -92,6 +89,18 @@ This is the organized layout of the repository, showcasing all files and directo
 This app uses the **Jobber Public API** via OAuth 2.0.  
 - Callback URL is set in `/docs` for testing (ngrok during dev).  
 - Requires approved API credentials from Jobber.  
+
+---
+
+##  Testing
+To test without Jobber API approval:
+- testing uses automatic testing through pytest, to automatically test (independent of api availability) follow steps below
+- Set `TEST_MODE=True` in `.env` with mock Jobber keys (`JOBBER_CLIENT_ID`, `JOBBER_CLIENT_SECRET`).
+- Ensure `OPENWEATHER_API_KEY` is valid in `.env` for real weather checks.
+- Install dependencies: `pip install -r requirements.txt`
+- Run tests: `python -m pytest testing\`
+- Tests in `testing\test_book_job.py` use `mock_data.py` for Jobber responses and real weather data.
+- If weather causes failures, check Saskatoon weather or mock `check_weather` in `weather.py`.
 
 ---
 
