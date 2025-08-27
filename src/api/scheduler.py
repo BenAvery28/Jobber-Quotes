@@ -16,6 +16,7 @@ WORK_START = 9  # 9 am
 WORK_END = 17  # 5 pm
 grace_period = timedelta(minutes=30)
 
+
 def is_workday(d):
     """
     Return True if the given date is a weekday (Mon–Fri) and not a holiday.
@@ -23,17 +24,21 @@ def is_workday(d):
     weekday = d.weekday()  # monday = 0, sunday = 6 ( will I ever get use to it? )
     date_str = d.strftime("%Y-%m-%d")
 
-    is_weekday = weekday < 5   # cause 5 and 6 are sat and sun !
+    is_weekday = weekday < 5  # cause 5 and 6 are sat and sun !
 
     return is_weekday
 
+
 def estimate_time(quote_cost: float):
     """
-    Estimate job time based on quote cost.
+    Estimate job time based on cost.
     Rules:
       - Full day = $1440 = 8 hours
       - 4-hour chunk = $720
       - Hourly crew rate = $180
+      Returns:
+       time delta: estimated job completion time frame
+       -1: invalid input
     """
     if quote_cost <= 0:
         return -1  # invalid quote
@@ -47,30 +52,62 @@ def estimate_time(quote_cost: float):
     remainder = remainder % 720
 
     # hourly
-    hours = remainder / 180   # remainder should always be divisible by 180 cleanly
+    hours = remainder / 180  # remainder should always be divisible by 180 cleanly
 
     return timedelta(days=int(days), hours=int(chunks * 4 + hours))
 
-def check_availability(start_time, duration):
+
+def check_availability(start_time, duration, visits):
+    """
+    Check if a time slot is available.
+    Args:
+        start_time (datetime): Start of the slot.
+        duration (timedelta): Duration of the job.
+        visits (list): List of booked visits.
+    Returns:
+        bool: True if slot is free, False otherwise.
+    """
+
     end_time = start_time + duration
-    for visit in get_visits():
-        visit_start = datetime.fromisoformat(visit['start_at']) - grace_period
-        visit_end = datetime.fromisoformat(visit['end_at']) + grace_period
+    for visit in visits:  # Use passed visits instead of get_visits()
+        visit_start = datetime.fromisoformat(visit['startAt']) - grace_period
+        visit_end = datetime.fromisoformat(visit['endAt']) + grace_period
         if not (end_time <= visit_start or start_time >= visit_end):
             return False
     return True
 
-def auto_book(start_date, duration, city):
+
+def auto_book(visits, start_date, duration, city):
+    """
+    Find the next available slot for a job.
+    - Only books on weekdays
+    - Checks weather before booking
+    - Uses 30-min increments within 9–5
+    - Stops searching after 30 days
+    Args:
+        visits (list): Current bookings
+        start_date (datetime): Starting point to search
+        duration (timedelta): Job length
+        city (str): City (for weather check)
+    Returns:
+        dict: {"startAt": str, "endAt": str}
+        None: No slot found
+    """
+
     d = start_date.replace(hour=WORK_START, minute=0, second=0, microsecond=0)
 
-    while True:
+    # add a safety limit to prevent infinite loops
+    max_days_to_check = 30
+    days_checked = 0
+
+    while days_checked < max_days_to_check:
         if is_workday(d):
             if check_weather(city, d, WORK_START, WORK_END):
                 day_start = d.replace(hour=WORK_START, minute=0)
                 day_end = d.replace(hour=WORK_END, minute=0)
                 slot = day_start
                 while slot + duration <= day_end:
-                    if check_availability(slot, duration):
+                    if check_availability(slot, duration, visits):  # Pass visits
                         start_at = slot.isoformat()
                         end_at = (slot + duration).isoformat()
                         add_visit(start_at, end_at)
@@ -78,3 +115,20 @@ def auto_book(start_date, duration, city):
                     slot += timedelta(minutes=30)
 
         d = (d + timedelta(days=1)).replace(hour=WORK_START, minute=0, second=0, microsecond=0)
+        days_checked += 1
+
+    # return none if no slot found after max days
+    return None
+
+"""
+fill in later to de register customer
+"""
+def auto_debook(name):
+    """
+    Placeholder for removing a booking by customer/job name.
+    To implement:
+      - Use src.db.remove_visit_by_name(name)
+      - Ensure Jobber calendar + notifications are updated
+    """
+    return
+
