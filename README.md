@@ -32,21 +32,9 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
   - `README.md` (You're here!)
   - `requirements.txt` (Dependencies)
   - `run.py` (Run script)
-  - 📁 **.idea** (PyCharm configuration)
-    - `.gitignore`
-    - `Jobber Quotes.iml`
-    - `misc.xml`
-    - `modules.xml`
-    - `vcs.xml`
-    - `workspace.xml`
-    - 📁 **inspectionProfiles**
-      - `profiles_settings.xml`
   - 📁 **config** (Configuration files)
     - `settings.py`
     - `init.py`
-    - 📁 **__pycache__**
-      - `settings.cpython-39.pyc`
-      - `init.cpython-39.pyc`
   - 📁 **docker** (Docker setup)
     - `docker-compose.yml`
     - `Dockerfile`
@@ -56,30 +44,25 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
     - `terms-of-service.html`
   - 📁 **src** (Source code)
     - `main.py`
+    - `db.py`
     - `webapp.py`
-    - `init.py`
+    - `__init__.py`
     - 📁 **api** (API modules)
       - `jobber_client.py`
       - `scheduler.py`
       - `weather.py`
-      - `init.py`
-      - 📁 **__pycache__**
-        - `jobber_client.cpython-39.pyc`
-        - `scheduler.cpython-39.pyc`
-        - `init.cpython-39.pyc`
-    - 📁 **__pycache__**
-      - `main.cpython-39.pyc`
-      - `webapp.cpython-39.pyc`
-      - `init.cpython-39.pyc`
+      - `__init__.py`
   - 📁 **testing** (Test files)
-    - `init.py`
+    - `__init__.py`
+    - `mock_data.py`
+    - `test_book_job.py`
 ---
 
 ##  Tech Stack  
 
 - **Language:** Python 3.9.13
-- **Frameworks/Libraries:** (to be confirmed — likely FastAPI/Flask + httpx/requests)  
-- **Dev Tools:** Git, PyCharm  
+- **Frameworks/Libraries:** (to be confirmed — likely FastAPI/Flask + httpx/requests + SQLite)  
+- **Dev Tools:** Git, PyCharm, Pytest, Vim, Emacs 
 - **Hosting:** TBD (ngrok/local for dev, cloud for prod)  
 
 ---
