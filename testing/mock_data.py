@@ -1,6 +1,7 @@
-#testing/mock_data.py
+# testing/mock_data.py
 import random
 from datetime import datetime, timedelta
+
 
 def generate_mock_quote(quote_id=None):
     """
@@ -8,15 +9,18 @@ def generate_mock_quote(quote_id=None):
     params:
      - quote_id (str, optional): if none, generates a random quote id
     Returns:
-     - dictionary quote containing: id, client (email + city), amount (total price)
+     - dictionary quote containing: id, client (id, email + city), amount (total price)
     """
 
     if quote_id is None:
         quote_id = f"Q{random.randint(100, 999)}"
 
+    client_id = f"C{random.randint(100, 999)}"
+
     return {
         "id": quote_id,
         "client": {
+            "id": client_id,
             "emails": [{"address": f"client{random.randint(1, 10)}@example.com"}],
             "properties": [{"city": random.choice(["Saskatoon", "Warman", "Emma Lake"])}]
         },
@@ -34,12 +38,14 @@ def generate_mock_visits(count=5):
      list[dict]: Each visit has:
             - startAt: ISO start datetime
             - endAt: ISO end datetime (2 hours after start)
+            - client_id: Mock client ID
     """
 
     return [
         {
             "startAt": (datetime.now() + timedelta(days=i)).isoformat(),
-            "endAt": (datetime.now() + timedelta(days=i, hours=2)).isoformat()
+            "endAt": (datetime.now() + timedelta(days=i, hours=2)).isoformat(),
+            "client_id": f"C{random.randint(100, 999)}"
         }
         for i in range(count)
     ]
@@ -49,22 +55,108 @@ def generate_mock_webhook(quote_id=None):
     """
     Generate a mock webhook payload similar to what jobber sends when a quote is approved
     returns:
-    dict containing>
+    dict containing:
         - id: "Q123" (default)
         - quoteStatus: "APPROVED"
         - amounts: totalPrice fixed at 500.00
-        - client: mock property with city "Saskatoon"
+        - client: mock client with ID and property with city "Saskatoon"
     """
 
     if quote_id is None or quote_id != "Q123":
         quote_id = "Q123"
     status = "APPROVED"
+    client_id = "C123"  # Consistent client ID for testing
 
     return {
         "data": {
             "id": quote_id,
             "quoteStatus": status,
             "amounts": {"totalPrice": 500.00},
-            "client": {"properties": [{"city": "Saskatoon"}]}
+            "client": {
+                "id": client_id,
+                "properties": [{"city": "Saskatoon"}]
+            }
         }
     }
+
+
+def generate_test_webhook_variations():
+    """
+    Generate various webhook payloads for testing different scenarios
+    Returns list of test cases with different client IDs, costs, and cities
+    """
+    test_cases = [
+        {
+            "name": "standard_booking",
+            "payload": {
+                "id": "Q001",
+                "quoteStatus": "APPROVED",
+                "amounts": {"totalPrice": 720.00},  # 4-hour job
+                "client": {
+                    "id": "C001",
+                    "properties": [{"city": "Saskatoon"}]
+                }
+            }
+        },
+        {
+            "name": "high_value_booking",
+            "payload": {
+                "id": "Q002",
+                "quoteStatus": "APPROVED",
+                "amounts": {"totalPrice": 2880.00},  # 2-day job
+                "client": {
+                    "id": "C002",
+                    "properties": [{"city": "Warman"}]
+                }
+            }
+        },
+        {
+            "name": "small_booking",
+            "payload": {
+                "id": "Q003",
+                "quoteStatus": "APPROVED",
+                "amounts": {"totalPrice": 180.00},  # 1-hour job
+                "client": {
+                    "id": "C003",
+                    "properties": [{"city": "Emma Lake"}]
+                }
+            }
+        },
+        {
+            "name": "rejected_quote",
+            "payload": {
+                "id": "Q004",
+                "quoteStatus": "REJECTED",
+                "amounts": {"totalPrice": 500.00},
+                "client": {
+                    "id": "C004",
+                    "properties": [{"city": "Saskatoon"}]
+                }
+            }
+        }
+    ]
+    return test_cases
+
+
+def generate_mock_calander_data():
+    """
+    Generate mock data that would exist in the calander table
+    Returns list of dictionaries matching calander table structure
+    """
+    base_date = datetime.now()
+    mock_entries = []
+
+    for i in range(5):
+        date = base_date + timedelta(days=i)
+        start_time = date.replace(hour=9 + (i * 2), minute=0, second=0, microsecond=0)
+        finish_time = start_time + timedelta(hours=2)
+
+        entry = {
+            "date": start_time.strftime("%Y-%m-%d"),
+            "client_id": f"C{100 + i}",
+            "start_time": start_time.isoformat(),
+            "finish_time": finish_time.isoformat()
+        }
+        mock_entries.append(entry)
+
+    return mock_entries
