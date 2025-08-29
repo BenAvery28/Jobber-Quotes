@@ -11,11 +11,13 @@ from fastapi.responses import HTMLResponse
 from testing.mock_data import generate_mock_webhook  # Already there
 from src.db import init_db, get_visits, add_visit  # Already there
 
+
 # -------------------
 # TEST MODE (dynamic)
 # -------------------
 def in_test_mode() -> bool:
     return os.getenv("TEST_MODE", "False").lower() == "true"
+
 
 init_db()
 
@@ -38,6 +40,7 @@ if not JOBBER_CLIENT_SECRET:
 STATE = {"value": None}
 TOKENS = {}
 
+
 # -------------------
 # AUTH ENDPOINTS
 # -------------------
@@ -59,11 +62,9 @@ async def start_auth():
     )
     return RedirectResponse(str(url))
 
+
 # ... oauth_callback stays the same ...
 
-# -------------------
-# BOOK JOB ENDPOINT
-# -------------------
 @app.post("/book-job")
 async def book_job_endpoint(request: Request):
     """
@@ -73,25 +74,24 @@ async def book_job_endpoint(request: Request):
         "id": "Q123",
         "quoteStatus": "APPROVED",
         "amounts": {"totalPrice": 500.00},
-        "client": {"properties": [{"city": "Saskatoon"}]}
+        "client": {"id": "C123", "properties": [{"city": "Saskatoon"}]}
     }
     """
     # ----------------------
     # Step 1: Validate payload first
     # ----------------------
     try:
-        if in_test_mode():
-            # Use mock webhook data in test mode
-            data = generate_mock_webhook()["data"]
-        else:
-            data = await request.json()
+        # Always try to read the actual request data first
+        data = await request.json()
 
+        # Validate required fields immediately
         if not data or not isinstance(data, dict):
             raise HTTPException(status_code=400, detail="Empty or invalid payload")
 
         quote_id = data.get("id")
         status = data.get("quoteStatus")
         cost = data.get("amounts", {}).get("totalPrice")
+        client_id = data.get("client", {}).get("id", "C123")  # Extract client ID
 
         if not quote_id:
             raise HTTPException(status_code=400, detail="Missing Quote ID")
@@ -103,7 +103,23 @@ async def book_job_endpoint(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
+        # Only use mock data if we can't parse JSON AND we're in test mode
+        # AND the request body is completely empty
+        if in_test_mode():
+            try:
+                request_body = await request.body()
+                if not request_body:  # Only use mock for truly empty requests
+                    data = generate_mock_webhook()["data"]
+                    quote_id = data.get("id")
+                    status = data.get("quoteStatus")
+                    cost = data.get("amounts", {}).get("totalPrice")
+                    client_id = data.get("client", {}).get("id", "C123")
+                else:
+                    raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {e}")
+            except:
+                raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid payload: {e}")
 
     # ----------------------
     # Step 2: Authentication check
@@ -118,11 +134,6 @@ async def book_job_endpoint(request: Request):
     if status != "APPROVED":
         return JSONResponse({"status": "Ignored - Not an approved quote"})
 
-    # mock quote data for now until real API access
-    quote = generate_mock_webhook(quote_id)
-    if not quote:
-        raise HTTPException(status_code=404, detail=f"Quote {quote_id} not found")
-
     # estimate duration based on cost
     estimated_duration = estimate_time(cost) if cost is not None and cost > 0 else timedelta(hours=2)
     if estimated_duration == -1:
@@ -136,19 +147,23 @@ async def book_job_endpoint(request: Request):
     city = "Saskatoon"
 
     visits = get_visits()
-    slot = auto_book(visits, start_datetime, estimated_duration, city)
+    slot = auto_book(visits, start_datetime, estimated_duration, city, client_id)
     if not slot:
         raise HTTPException(status_code=400, detail="No available slot")
 
     start_slot = slot["startAt"]
     end_slot = slot["endAt"]
 
-    add_visit(start_slot, end_slot)
+    # Pass client_id to add_visit
+    add_visit(start_slot, end_slot, client_id)
 
-    job_response = await create_job(f"Quote {quote_id}", start_slot, end_slot, access_token=access or "mock_access_token")
+    job_response = await create_job(f"Quote {quote_id}", start_slot, end_slot,
+                                    access_token=access or "mock_access_token")
     job_id = job_response["data"]["jobCreate"]["job"]["id"]
-    await notify_team(job_id, f"Job scheduled: Quote {quote_id} at {start_slot}", access_token=access or "mock_access_token")
-    await notify_client(job_id, f"Your job is booked for {start_slot} to {end_slot}", access_token=access or "mock_access_token")
+    await notify_team(job_id, f"Job scheduled: Quote {quote_id} for client {client_id} at {start_slot}",
+                      access_token=access or "mock_access_token")
+    await notify_client(job_id, f"Your job is booked for {start_slot} to {end_slot}",
+                        access_token=access or "mock_access_token")
 
     return JSONResponse({
         "status": f"Quote {quote_id} approved and scheduled",
@@ -156,5 +171,6 @@ async def book_job_endpoint(request: Request):
         "scheduled_end": end_slot,
         "visits_count": len(get_visits()),
         "cost": cost,
-        "job_id": job_id
+        "job_id": job_id,
+        "client_id": client_id
     })
