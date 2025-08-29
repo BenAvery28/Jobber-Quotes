@@ -1,78 +1,91 @@
 import sqlite3
+import calendar as cal
 from datetime import datetime
 
-#sqlite database file name
 DB_PATH = "jobber_calendar.db"
 
-
-"""
-    initializes the data base and ensure the "calander" table exists
-    if table does not exist, it will be created.
-    table elements: 
-    - id: auto incremented primary key
-    - name: customers name 
-    - start_at: starting time of the appointment
-    - end_at: ending time of the appointment
-    - date: day of the appointment
-"""
 def init_db():
+    """
+    Initialize the database and ensure the 'calendar' table exists.
+    Columns:
+      - date: unique date for the booking (YYYY-MM-DD) (primary key)
+      - name: optional name of the client/job
+      - start_at: ISO timestamp of job start
+      - end_at: ISO timestamp of job end
+    """
     with sqlite3.connect(DB_PATH) as conn:
-        #
-        # CHANGE IMMEDIATELY
-        # add extra 'date' entry
-        # add customer name entry (think about collisions)
-        # change table name
-        #
-        conn.execute(""" CREATE TABLE IF NOT EXISTS visits ( id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS calendar (
+                date TEXT PRIMARY KEY,
+                name TEXT,
                 start_at TEXT NOT NULL,
                 end_at TEXT NOT NULL
             )
         """)
 
 
-"""
-    retrieve all the saved 'appointments' from the database
-    returns a list of dictionaries with keys at start_at and end_at
-"""
 def get_visits():
+    """
+    Fetch all bookings from the calendar.
+    Returns: list of dicts {date, name, startAt, endAt}
+    """
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("SELECT start_at, end_at FROM visits")
-        return [{"startAt": start, "endAt": end} for start, end in cursor.fetchall()]
+        cursor = conn.execute("SELECT date, name, start_at, end_at FROM calendar")
+        return [
+            {"date": date, "name": name, "startAt": start, "endAt": end}
+            for date, name, start, end in cursor.fetchall()
+        ]
 
 
-"""
-    inserts a new appointment to the database
-    params:
-     - start_at (string): ISO timestamp of the start of the appointment
-     - end_at (string): ISO timestamp of the end of the appointment
-"""
-def add_visit(start_at, end_at):
+def add_visit(start_at: str, end_at: str, name: str = None):
+    """
+    Add a visit (job booking) to the calendar.
+    The date is extracted from start_at (YYYY-MM-DD).
+    """
+    job_date = datetime.fromisoformat(start_at).strftime("%Y-%m-%d")
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("INSERT INTO visits (start_at, end_at) VALUES (?, ?)", (start_at, end_at))
+        conn.execute(
+            "INSERT OR REPLACE INTO calendar (date, name, start_at, end_at) VALUES (?, ?, ?, ?)",
+            (job_date, name, start_at, end_at),
+        )
         conn.commit()
 
 
-"""
-    removes customer from the table if they call off a visit
-    params: 
-    - name: the customers name
-"""
-def remove_appointment_by_name(name):
+def clear_visits():
+    """
+    Remove all bookings (testing only).
+    """
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("DELETE FROM visits WHERE name = ?", (name,))
+        conn.execute("DELETE FROM calendar")
+        conn.commit()
+
+
+def remove_visit_by_name(name: str) -> int:
+    """
+    Delete all bookings with the given name.
+    Returns: number of rows deleted.
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("DELETE FROM calendar WHERE name = ?", (name,))
         conn.commit()
         return cursor.rowcount
 
 
-###############################################################
-#                  TESTING UTILITIES                          #
-###############################################################
-"""
-    Deletes all records from the appointment table
-    Used for resseting db in 
-"""
-def clear_visits():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("DELETE FROM visits")
-        conn.commit()
+def get_booked_days_in_current_month() -> int:
+    """
+    Count how many distinct days in the current month have bookings.
+    Example: If jobs exist on 2025-08-01 and 2025-08-05 → returns 2
+    """
+    now = datetime.now()
+    month_start = now.replace(day=1).strftime("%Y-%m-%d")
+    _, last_day = cal.monthrange(now.year, now.month)
+    month_end = now.replace(day=last_day).strftime("%Y-%m-%d")
 
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("""
+            SELECT COUNT(DISTINCT date)
+            FROM calendar
+            WHERE date BETWEEN ? AND ?
+        """, (month_start, month_end))
+        result = cursor.fetchone()[0]
+        return result
