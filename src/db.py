@@ -4,49 +4,55 @@ from datetime import datetime
 
 DB_PATH = "jobber_calendar.db"
 
+
 def init_db():
     """
-    Initialize the database and ensure the 'calendar' table exists.
+    Initialize the database and ensure the 'calander' table exists.
     Columns:
-      - date: unique date for the booking (YYYY-MM-DD) (primary key)
-      - name: optional name of the client/job
-      - start_at: ISO timestamp of job start
-      - end_at: ISO timestamp of job end
+      - id: auto-increment primary key
+      - date: date of the current month (YYYY-MM-DD)
+      - client_id: client ID given by Jobber
+      - start_time: start time for the job (ISO timestamp)
+      - finish_time: finish time of the job (ISO timestamp)
     """
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS calendar (
-                date TEXT PRIMARY KEY,
-                name TEXT,
-                start_at TEXT NOT NULL,
-                end_at TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS calander (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                client_id TEXT NOT NULL,
+                start_time TEXT NOT NULL,
+                finish_time TEXT NOT NULL
             )
         """)
 
 
 def get_visits():
     """
-    Fetch all bookings from the calendar.
-    Returns: list of dicts {date, name, startAt, endAt}
+    Fetch all bookings from the calander.
+    Returns: list of dicts {date, client_id, startAt, endAt}
     """
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("SELECT date, name, start_at, end_at FROM calendar")
+        cursor = conn.execute("SELECT date, client_id, start_time, finish_time FROM calander")
         return [
-            {"date": date, "name": name, "startAt": start, "endAt": end}
-            for date, name, start, end in cursor.fetchall()
+            {"date": date, "client_id": client_id, "startAt": start_time, "endAt": finish_time}
+            for date, client_id, start_time, finish_time in cursor.fetchall()
         ]
 
 
-def add_visit(start_at: str, end_at: str, name: str = None):
+def add_visit(start_at: str, end_at: str, client_id: str = None):
     """
-    Add a visit (job booking) to the calendar.
+    Add a visit (job booking) to the calander.
     The date is extracted from start_at (YYYY-MM-DD).
     """
     job_date = datetime.fromisoformat(start_at).strftime("%Y-%m-%d")
+    if client_id is None:
+        client_id = "C123"  # Default client ID for backward compatibility
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO calendar (date, name, start_at, end_at) VALUES (?, ?, ?, ?)",
-            (job_date, name, start_at, end_at),
+            "INSERT INTO calander (date, client_id, start_time, finish_time) VALUES (?, ?, ?, ?)",
+            (job_date, client_id, start_at, end_at),
         )
         conn.commit()
 
@@ -56,17 +62,18 @@ def clear_visits():
     Remove all bookings (testing only).
     """
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("DELETE FROM calendar")
+        conn.execute("DELETE FROM calander")
         conn.commit()
 
 
 def remove_visit_by_name(name: str) -> int:
     """
-    Delete all bookings with the given name.
+    Delete all bookings with the given client_id.
     Returns: number of rows deleted.
+    Note: Updated to use client_id instead of name for consistency
     """
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("DELETE FROM calendar WHERE name = ?", (name,))
+        cursor = conn.execute("DELETE FROM calander WHERE client_id = ?", (name,))
         conn.commit()
         return cursor.rowcount
 
@@ -84,7 +91,7 @@ def get_booked_days_in_current_month() -> int:
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute("""
             SELECT COUNT(DISTINCT date)
-            FROM calendar
+            FROM calander
             WHERE date BETWEEN ? AND ?
         """, (month_start, month_end))
         result = cursor.fetchone()[0]
