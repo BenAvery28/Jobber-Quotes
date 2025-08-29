@@ -43,18 +43,19 @@ def estimate_time(quote_cost: float):
     if quote_cost <= 0:
         return -1  # invalid quote
 
-    # try to use full days
+    # try to use full days first
     days = quote_cost // 1440
     remainder = quote_cost % 1440
 
-    # try 4-hour chunks
+    # try 4-hour chunks next
     chunks = remainder // 720
     remainder = remainder % 720
 
-    # hourly
+    # remaining hours at $180/hour
     hours = remainder / 180  # remainder should always be divisible by 180 cleanly
 
-    return timedelta(days=int(days), hours=int(chunks * 4 + hours))
+    total_hours = int(days) * 24 + int(chunks) * 4 + hours
+    return timedelta(hours=total_hours)
 
 
 def check_availability(start_time, duration, visits):
@@ -77,7 +78,7 @@ def check_availability(start_time, duration, visits):
     return True
 
 
-def auto_book(visits, start_date, duration, city):
+def auto_book(visits, start_date, duration, city, client_id=None):
     """
     Find the next available slot for a job.
     - Only books on weekdays
@@ -89,6 +90,7 @@ def auto_book(visits, start_date, duration, city):
         start_date (datetime): Starting point to search
         duration (timedelta): Job length
         city (str): City (for weather check)
+        client_id (str): Client ID from Jobber (optional)
     Returns:
         dict: {"startAt": str, "endAt": str}
         None: No slot found
@@ -110,7 +112,7 @@ def auto_book(visits, start_date, duration, city):
                     if check_availability(slot, duration, visits):  # Pass visits
                         start_at = slot.isoformat()
                         end_at = (slot + duration).isoformat()
-                        add_visit(start_at, end_at)
+                        # Note: add_visit is called from webapp.py with client_id
                         return {"startAt": start_at, "endAt": end_at}
                     slot += timedelta(minutes=30)
 
@@ -120,17 +122,14 @@ def auto_book(visits, start_date, duration, city):
     # return none if no slot found after max days
     return None
 
-"""
-fill in later to de register customer
-"""
-def auto_debook(name):
+
+def auto_debook(client_id):
     """
-    Placeholder for removing a booking by customer/job name.
-    To implement:
-      - Use src.db.remove_visit_by_name(name)
-      - Ensure Jobber calendar + notifications are updated
+    Remove a booking by client ID.
+    Args:
+        client_id (str): Client ID to remove bookings for
+    Returns:
+        int: Number of bookings removed
     """
-    return
-
-
-
+    from src.db import remove_visit_by_name
+    return remove_visit_by_name(client_id)
