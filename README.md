@@ -27,8 +27,6 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
 
 
 - 📁 **Root Directory**
-  - `.env` (Environment variables)
-  - `.gitignore` (Ignored files)
   - `README.md` (You're here!)
   - `requirements.txt` (Dependencies)
   - `run.py` (Run script)
@@ -49,6 +47,7 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
     - `__init__.py`
     - 📁 **api** (API modules)
       - `jobber_client.py`
+      - `rescheduler.py`
       - `scheduler.py`
       - `weather.py`
       - `__init__.py`
@@ -56,12 +55,21 @@ This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. I
     - `__init__.py`
     - `mock_data.py`
     - `test_book_job.py`
+    - `debug_client_id.py`
+    - `fix_database_schema.py`
+    - `test_calander_functionality.py`
+    - `test_fixes.py`
+    - `test_invalid_payloads.py`
+    - `test_rescheduling.py`
+    - `test_weather_api.py`
+    - `test_webhook_calander_integration.py`
+
 ---
 
 ##  Tech Stack  
 
 - **Language:** Python 3.9.13
-- **Frameworks/Libraries:** (to be confirmed — likely FastAPI/Flask + httpx/requests + SQLite)  
+- **Frameworks/Libraries:** (to be confirmed — likely FastAPI/Flask + httpx/requests + SQLite + GraphQL)  
 - **Dev Tools:** Git, PyCharm, Pytest, Vim, Emacs 
 - **Hosting:** TBD (ngrok/local for dev, cloud for prod)  
 
