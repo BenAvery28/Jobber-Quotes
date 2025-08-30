@@ -1,26 +1,22 @@
 # weather.py
 #
-#   OpenWeatherMap API to check weather conditions
+#   OpenWeatherMap API using One Call API 3.0 for 4-day hourly forecasts
 
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from config.settings import OPENWEATHER_API_KEY
 
 
-def check_weather(city, date, start_hour=9, end_hour=17):
+def get_hourly_forecast(city, days_ahead=4):
     """
-    Check if weather conditions are suitable for a job on a given date and time range.
-    Uses OpenWeather hourly forecast API: checks probability of precipitation (pop).
-    Returns True if suitable (pop < 50% and no snow/thunder) for all hours, False otherwise.
+    Get weather forecast using free 5-day/3-hour forecast API
+    Returns forecast data for next 5 days with 3-hour intervals
     Args:
-        city (str): City name.
-        date (datetime): Date to check.
-        start_hour (int): Start hour (default 9 AM).
-        end_hour (int): End hour (default 5 PM).
+        city (str): City name
+        days_ahead (int): Number of days to forecast (default 4)
+    Returns:
+        dict: Weather forecast data with list of 3-hour forecasts
     """
-    # DEbug
-    # print(f"Checking weather for {city} on {date.date()} from {start_hour}:00 to {end_hour}:00")
-
     # Default to Saskatoon, SK, CA
     state_code = "SK"
     country_code = "CA"
@@ -31,34 +27,125 @@ def check_weather(city, date, start_hour=9, end_hour=17):
 
     try:
         geo_resp = requests.get(geo_url, params=geo_params, timeout=5).json()
-
-        # debug
-        # print(f"Geocoding response: {geo_resp}")
-
         if not geo_resp:
-            # print("No geocoding data found")
-            return False
+            return None
         lat, lon = geo_resp[0]["lat"], geo_resp[0]["lon"]
     except Exception as e:
-        # print(f"Geocoding error: {e}")
-        return False
+        print(f"Geocoding error: {e}")
+        return None
 
-    hourly_url = "https://pro.openweathermap.org/data/2.5/forecast/hourly"
-    params = {"lat": lat, "lon": lon, "appid": OPENWEATHER_API_KEY, "units": "metric"}
+    # Use free 5-day/3-hour forecast API
+    forecast_url = "https://api.openweathermap.org/data/2.5/forecast"
+    params = {
+        "lat": lat,
+        "lon": lon,
+        "appid": OPENWEATHER_API_KEY,
+        "units": "metric"
+    }
+
     try:
-        forecast = requests.get(hourly_url, params=params, timeout=5).json()
-        # print(f"Hourly forecast response: {forecast}")  # Debug
-        target_date = date.date()
-        for item in forecast.get("list", []):
-            forecast_time = datetime.fromtimestamp(item["dt"]).replace(tzinfo=None)  # Remove tz for comparison
-            if forecast_time.date() == target_date and start_hour <= forecast_time.hour < end_hour:
-                weather = item["weather"][0]["main"]
-                pop = item.get("pop", 0)  # probability of precipitation (0–1)
-                # print(f"Hour {forecast_time.hour}: Weather: {weather}, POP: {pop}")
-                if weather in ["Snow", "Thunderstorm"] or pop > 0.5:
-                    return False
-        # print("All hours suitable or no data for range")
-        return True
+        forecast = requests.get(forecast_url, params=params, timeout=10).json()
+        return forecast
     except Exception as e:
-        # print(f"Forecast error: {e}")
-        return False
+        print(f"Forecast API error: {e}")
+        return None
+
+
+def check_weather(city, date, start_hour=9, end_hour=17):
+    """
+    Check if weather conditions are suitable for a job on a given date and time range.
+    Uses free 5-day forecast API with 3-hour intervals.
+    Returns True if suitable (pop < 50% and no severe weather), False otherwise.
+    Args:
+        city (str): City name
+        date (datetime): Date to check
+        start_hour (int): Start hour (default 9 AM)
+        end_hour (int): End hour (default 5 PM)
+    """
+    forecast = get_hourly_forecast(city, days_ahead=4)
+    if not forecast or 'list' not in forecast:
+        # If weather API fails, be conservative and allow booking
+        return True
+
+    target_date = date.date()
+
+    # Check 3-hourly forecast data
+    for item in forecast['list']:
+        forecast_time = datetime.fromtimestamp(item["dt"]).replace(tzinfo=None)
+
+        # Check if this forecast falls within our date and time range
+        if (forecast_time.date() == target_date and
+                start_hour <= forecast_time.hour < end_hour):
+
+            weather_main = item["weather"][0]["main"]
+            pop = item.get("pop", 0)  # probability of precipitation (0-1)
+
+            # Check for severe weather conditions
+            if weather_main in ["Snow", "Thunderstorm"] or pop > 0.5:
+                return False
+
+    return True
+
+
+def get_next_suitable_weather_slot(city, start_datetime, duration_hours):
+    """
+    Find the next suitable weather window for a job using free forecast API
+    Args:
+        city (str): City name
+        start_datetime (datetime): Earliest possible start time
+        duration_hours (float): Job duration in hours
+    Returns:
+        dict: {"start": datetime, "end": datetime} or None if no suitable slot
+    """
+    forecast = get_hourly_forecast(city, days_ahead=4)
+    if not forecast or 'list' not in forecast:
+        return None
+
+    # Check 3-hourly forecast data
+    for item in forecast['list']:
+        forecast_time = datetime.fromtimestamp(item["dt"]).replace(tzinfo=None)
+
+        # Skip times before our start time or outside work hours (9-5)
+        if forecast_time < start_datetime or forecast_time.hour < 9 or forecast_time.hour >= 17:
+            continue
+
+        # Check if this time has suitable weather
+        weather_main = item["weather"][0]["main"]
+        pop = item.get("pop", 0)
+
+        if weather_main not in ["Snow", "Thunderstorm"] and pop <= 0.5:
+            # For 3-hour intervals, we'll assume the weather is good for the duration
+            slot_end = forecast_time + timedelta(hours=duration_hours)
+
+            return {
+                "start": forecast_time,
+                "end": slot_end,
+                "pop": pop,
+                "weather": weather_main
+            }
+
+    return None
+
+
+def _check_weather_window(hourly_data, start_time, end_time):
+    """
+    Check if a specific time window has suitable weather
+    Args:
+        hourly_data (list): Hourly forecast data
+        start_time (datetime): Window start
+        end_time (datetime): Window end
+    Returns:
+        bool: True if entire window has suitable weather
+    """
+    for item in hourly_data:
+        forecast_time = datetime.fromtimestamp(item["dt"]).replace(tzinfo=None)
+
+        # Check if this forecast time falls within our window
+        if start_time <= forecast_time <= end_time:
+            weather_main = item["weather"][0]["main"]
+            pop = item.get("pop", 0)
+
+            if weather_main in ["Snow", "Thunderstorm"] or pop > 0.5:
+                return False
+
+    return True
