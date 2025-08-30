@@ -5,6 +5,8 @@ import httpx
 from datetime import datetime, timedelta
 from src.api.scheduler import auto_book, is_workday, estimate_time
 from src.api.jobber_client import create_job, notify_team, notify_client
+from src.api.rescheduler import cancel_appointment, run_daily_weather_check, compact_schedule, \
+    check_weather_impact_on_schedule
 from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_KEY
 import secrets
 from fastapi.responses import HTMLResponse
@@ -63,8 +65,9 @@ async def start_auth():
     return RedirectResponse(str(url))
 
 
-# ... oauth_callback stays the same ...
-
+# -------------------
+# BOOK JOB ENDPOINT
+# -------------------
 @app.post("/book-job")
 async def book_job_endpoint(request: Request):
     """
@@ -173,4 +176,147 @@ async def book_job_endpoint(request: Request):
         "cost": cost,
         "job_id": job_id,
         "client_id": client_id
+    })
+
+
+# -------------------
+# RESCHEDULING ENDPOINTS
+# -------------------
+@app.post("/cancel-appointment")
+async def cancel_appointment_endpoint(request: Request):
+    """
+    Cancel an appointment and trigger automatic rescheduling
+    Payload: {"client_id": "C123", "reason": "Customer requested cancellation"}
+    """
+    try:
+        data = await request.json()
+        client_id = data.get("client_id")
+        reason = data.get("reason", "Customer cancellation")
+
+        if not client_id:
+            raise HTTPException(status_code=400, detail="Missing client_id")
+
+        result = cancel_appointment(client_id, reason)
+
+        # Notify about rescheduled jobs if any
+        if result.get("rescheduled_jobs"):
+            access_token = TOKENS.get("access_token", "mock_access_token")
+            from src.api.rescheduler import notify_rescheduled_jobs
+            await notify_rescheduled_jobs(result["rescheduled_jobs"], access_token)
+
+        return JSONResponse(result)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cancellation failed: {e}")
+
+
+@app.get("/weather-check")
+async def run_weather_check():
+    """
+    Manual trigger for weather-based rescheduling check
+    """
+    try:
+        result = run_daily_weather_check("Saskatoon")
+
+        # Notify about rescheduled jobs if any
+        if result.get("rescheduled_jobs"):
+            access_token = TOKENS.get("access_token", "mock_access_token")
+            from src.api.rescheduler import notify_rescheduled_jobs
+            await notify_rescheduled_jobs(result["rescheduled_jobs"], access_token)
+
+        return JSONResponse(result)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Weather check failed: {e}")
+
+
+@app.post("/optimize-schedule")
+async def optimize_schedule():
+    """
+    Compact and optimize the current schedule
+    """
+    try:
+        result = compact_schedule()
+        return JSONResponse(result)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schedule optimization failed: {e}")
+
+
+@app.get("/weather-forecast/{city}")
+async def get_weather_forecast(city: str):
+    """
+    Get 4-day weather forecast for a city
+    """
+    try:
+        from src.api.weather import get_hourly_forecast
+        forecast = get_hourly_forecast(city, days_ahead=4)
+
+        if not forecast:
+            raise HTTPException(status_code=404, detail=f"Weather data not available for {city}")
+
+        return JSONResponse({
+            "city": city,
+            "forecast": forecast,
+            "hourly_available": "hourly" in forecast,
+            "daily_available": "daily" in forecast
+        })
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Weather forecast failed: {e}")
+
+
+@app.get("/schedule-status")
+async def get_schedule_status():
+    """
+    Get current schedule status and weather impact analysis
+    """
+    try:
+        visits = get_visits()
+
+        # Check weather impact on current schedule
+        weather_affected = check_weather_impact_on_schedule(visits, "Saskatoon")
+
+        # Separate future and past visits
+        now = datetime.now()
+        future_visits = [v for v in visits if datetime.fromisoformat(v['startAt']) > now]
+        past_visits = [v for v in visits if datetime.fromisoformat(v['startAt']) <= now]
+
+        return JSONResponse({
+            "total_appointments": len(visits),
+            "future_appointments": len(future_visits),
+            "completed_appointments": len(past_visits),
+            "weather_affected_jobs": len(weather_affected),
+            "weather_affected_details": weather_affected,
+            "schedule": visits
+        })
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schedule status failed: {e}")
+
+
+@app.get("/")
+async def root():
+    """
+    Root endpoint with API overview
+    """
+    return JSONResponse({
+        "service": "Shimmer & Shine - Jobber Quotes AI Scheduler",
+        "version": "2.0",
+        "features": [
+            "Automatic quote approval processing",
+            "Weather-based scheduling",
+            "Client cancellation handling",
+            "Automatic rescheduling",
+            "4-day weather forecasts",
+            "Schedule optimization"
+        ],
+        "endpoints": {
+            "booking": "/book-job",
+            "cancellation": "/cancel-appointment",
+            "weather_check": "/weather-check",
+            "optimize": "/optimize-schedule",
+            "forecast": "/weather-forecast/{city}",
+            "status": "/schedule-status"
+        }
     })
