@@ -1,106 +1,296 @@
-# Shimmer & Shine – Jobber Quotes AI Scheduler  
+# Shimmer & Shine Jobber Integration
 
-This project is an internal tool for **Shimmer & Shine Window Cleaning Ltd.**. It integrates with the **Jobber API** to automate the workflow from approved quotes to confirmed bookings, saving time and improving customer communication.  
+> **Automated quote-to-booking workflow system for professional window cleaning services**
+
+[![Python](https://img.shields.io/badge/Python-3.9.13-blue.svg)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Latest-green.svg)](https://fastapi.tiangolo.com/)
+[![License](https://img.shields.io/badge/License-Private-red.svg)]()
+
+## Overview
+
+The Shimmer & Shine Jobber Integration is an intelligent automation system that streamlines the entire customer journey from quote approval to job completion. Built specifically for **Shimmer & Shine Window Cleaning Ltd.**, this system eliminates manual scheduling overhead while ensuring optimal resource allocation and customer satisfaction.
+
+### Key Features 
+
+- **🚀 Zero-Touch Automation**: Quotes automatically convert to scheduled jobs
+- **🌤️ Weather Intelligence**: Smart scheduling based on weather conditions  
+- **📅 Optimal Scheduling**: Intelligent time slot management with crew availability
+- **📱 Real-Time Notifications**: Automated updates for both teams and customers
+- **⚡ FastAPI Performance**: High-performance async API architecture
 
 ---
 
-##  Features  
+## System Architecture
 
-- **Quote Approval Flow**  
-  - When a quote is approved, the app sends an automatic thank-you message.  
+### Core Components
 
-- **Scheduling Logic**  
-  - Checks Jobber availability to find an open slot.  
-  - Estimates the correct job duration (hours for small jobs, multiple days for big ones).  
-  - Accounts for weather conditions before booking.  
+| Component | Purpose | Technology |
+|-----------|---------|------------|
+| **Webhook Handler** | Processes Jobber quote approvals | FastAPI |
+| **Scheduler Engine** | Finds optimal booking slots | Custom Algorithm |
+| **Weather Service** | Validates weather conditions | OpenWeatherMap API |
+| **Database Layer** | Persistent booking storage | SQLite |
+| **Jobber Integration** | Creates jobs & sends notifications | GraphQL API |
 
-- **Automation**  
-  - Books the job into Jobber’s calendar.  
-  - Notifies the assigned crew members.  
-  - Confirms the tentative/confirmed date and time with the customer.  
-  - Rinse and repeat; no manual touch is required.  
+### Workflow
+
+```mermaid
+graph TD
+    A[Quote Approved] --> B[Webhook Received]
+    B --> C[Estimate Duration]
+    C --> D[Check Availability]
+    D --> E[Validate Weather]
+    E --> F[Book Job Slot]
+    F --> G[Create Jobber Job]
+    G --> H[Notify Team & Client]
+    
+    I[Daily Weather Check] --> J{Weather Changed?}
+    J -->|Bad Weather| K[Find New Slot]
+    J -->|Good Weather| L[Keep Current Booking]
+    K --> M[Update Jobber Job]
+    M --> N[Notify All Parties]
+```
+
+---
+
+## Features
+
+### 🎯 Intelligent Scheduling
+
+- **Duration Estimation**: Automatic job duration calculation based on quote value
+  - Full day (8h): $1,440+
+  - Half day (4h): $720
+  - Hourly rate: $180/hour
+- **Availability Checking**: Real-time calendar conflict detection
+- **Grace Periods**: 30-minute buffers between appointments
+
+### 🌦️ Weather Integration
+
+- **Forecast Analysis**: 5-day weather prediction integration
+- **Precipitation Filtering**: Automatic rescheduling for rain/snow (>50% probability)
+- **Severe Weather Protection**: Thunder and snowstorm avoidance
+- **Periodic Rechecking**: Daily weather validation 24-48 hours before scheduled jobs
+- **Automatic Rescheduling**: Smart rebooking when weather conditions deteriorate
+
+### 📋 Business Logic
+
+- **Working Hours**: Monday-Friday, 9 AM - 5 PM scheduling
+- **Holiday Awareness**: Automatic holiday detection and avoidance  
+- **30-Day Horizon**: Intelligent slot searching up to 30 days ahead
+- **Conflict Resolution**: Smart handling of scheduling conflicts
+
+### 🔧 Development Features
+
+- **Test Mode**: Complete mock environment for development
+- **OAuth 2.0**: Secure Jobber API authentication
+- **Comprehensive Logging**: Full audit trail of all operations
+- **Error Handling**: Robust exception management and recovery
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.9.13+
+- Valid Jobber API credentials
+- OpenWeatherMap API key
+- ngrok (for development webhooks)
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd jobber-quotes-scheduler
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Configure environment variables**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API credentials
+   ```
+
+4. **Initialize the database**
+   ```bash
+   python -c "from src.db import init_db; init_db()"
+   ```
+
+### Configuration
+
+Create a `.env` file with the following variables:
+
+```env
+# Jobber API Configuration
+JOBBER_CLIENT_ID=your_client_id
+JOBBER_CLIENT_SECRET=your_client_secret
+JOBBER_API_BASE=https://api.getjobber.com/api
+JOBBER_API_KEY=your_api_key
+
+# Weather Service
+OPENWEATHER_API_KEY=your_weather_key
+
+# Development Mode
+TEST_MODE=True
+```
+
+### Running the Application
+
+#### Development Mode
+```bash
+python main.py
+```
+The API will be available at `http://localhost:8000`
+
+#### Production Mode
+```bash
+uvicorn src.webapp:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+---
+
+## API Documentation
+
+### Endpoints
+
+#### `POST /book-job`
+Webhook endpoint for processing approved quotes.
+
+**Request Body:**
+```json
+{
+  "id": "Q123",
+  "quoteStatus": "APPROVED", 
+  "amounts": {"totalPrice": 500.00},
+  "client": {"properties": [{"city": "Saskatoon"}]}
+}
+```
+
+**Response:**
+```json
+{
+  "status": "Quote Q123 approved and scheduled",
+  "scheduled_start": "2025-09-01T09:00:00",
+  "scheduled_end": "2025-09-01T12:00:00",
+  "job_id": "JQuote_Q123",
+  "cost": 500.00,
+  "visits_count": 1
+}
+```
+
+#### `GET /auth`
+Initiates OAuth flow with Jobber.
+
+#### `GET /oauth/callback`  
+Handles OAuth callback from Jobber.
+
+---
+
+## Testing
+
+### Running Tests
+
+```bash
+# Run all tests
+python -m pytest testing/
+
+# Run with coverage
+python -m pytest testing/ --cov=src
+
+# Run specific test file
+python -m pytest testing/test_book_job.py -v
+```
+
+### Test Configuration
+
+Set `TEST_MODE=True` in your `.env` file to use mock data instead of real API calls.
+
+**Test Coverage:**
+- ✅ Quote approval workflow
+- ✅ Scheduling logic validation  
+- ✅ Weather condition checking
+- ✅ Error handling scenarios
+- ✅ Authentication flows
 
 ---
 
 ## Project Structure
-### This is the organized layout of the repository, showcasing all files and directories used in the project.
 
-
-- 📁 **Root Directory**
-  - `README.md` (You're here!)
-  - `requirements.txt` (Dependencies)
-  - `run.py` (Run script)
-  - 📁 **config** (Configuration files)
-    - `settings.py`
-    - `init.py`
-  - 📁 **docker** (Docker setup)
-    - `docker-compose.yml`
-    - `Dockerfile`
-  - 📁 **docs** (Documentation and legal pages)
-    - `index.html`
-    - `privacy-policy.html`
-    - `terms-of-service.html`
-  - 📁 **src** (Source code)
-    - `main.py`
-    - `db.py`
-    - `webapp.py`
-    - `__init__.py`
-    - 📁 **api** (API modules)
-      - `jobber_client.py`
-      - `rescheduler.py`
-      - `scheduler.py`
-      - `weather.py`
-      - `__init__.py`
-  - 📁 **testing** (Test files)
-    - `__init__.py`
-    - `mock_data.py`
-    - `test_book_job.py`
-    - `debug_client_id.py`
-    - `fix_database_schema.py`
-    - `test_calander_functionality.py`
-    - `test_fixes.py`
-    - `test_invalid_payloads.py`
-    - `test_rescheduling.py`
-    - `test_weather_api.py`
-    - `test_webhook_calander_integration.py`
+```
+shimmer-shine-scheduler/
+├── 📁 config/              # Configuration management
+│   ├── settings.py         # Environment variable handling
+│   └── __init__.py
+├── 📁 src/                 # Core application code
+│   ├── main.py            # Application entry point
+│   ├── webapp.py          # FastAPI application & routes
+│   ├── db.py              # Database operations
+│   └── 📁 api/            # API integrations
+│       ├── jobber_client.py  # Jobber GraphQL client
+│       ├── scheduler.py      # Scheduling algorithms
+│       └── weather.py        # Weather service integration
+├── 📁 testing/            # Test suite
+│   ├── test_book_job.py   # Main workflow tests
+│   └── mock_data.py       # Test data generators
+├── 📁 docs/               # Documentation & legal
+│   ├── privacy-policy.html
+│   └── terms-of-service.html
+├── requirements.txt       # Python dependencies
+└── README.md             # This file
+```
 
 ---
 
-##  Tech Stack  
+## Deployment
 
-- **Language:** Python 3.9.13
-- **Frameworks/Libraries:** (to be confirmed — likely FastAPI/Flask + httpx/requests + SQLite + GraphQL)  
-- **Dev Tools:** Git, PyCharm, Pytest, Vim, Emacs 
-- **Hosting:** TBD (ngrok/local for dev, cloud for prod)  
+### Environment Setup
 
----
+The application supports multiple deployment environments:
 
-##  Jobber API Integration  
+- **Development**: Local testing with ngrok webhooks
+- **Staging**: Cloud deployment with test credentials  
+- **Production**: Full Jobber API integration
 
-This app uses the **Jobber Public API** via OAuth 2.0.  
-- Callback URL is set in `/docs` for testing (ngrok during dev).  
-- Requires approved API credentials from Jobber.  
+### Docker Support
 
----
+```bash
+# Build image
+docker build -t shimmer-shine-scheduler .
 
-##  Testing
-To test without Jobber API approval:
-- testing uses automatic testing through pytest, to automatically test (independent of api availability) follow steps below
-- Set `TEST_MODE=True` in `.env` with mock Jobber keys (`JOBBER_CLIENT_ID`, `JOBBER_CLIENT_SECRET`).
-- Ensure `OPENWEATHER_API_KEY` is valid in `.env` for real weather checks.
-- Install dependencies: `pip install -r requirements.txt`
-- Run tests: `python -m pytest testing\`
-- Tests in `testing\test_book_job.py` use `mock_data.py` for Jobber responses and real weather data.
-- If weather causes failures, check Saskatoon weather or mock `check_weather` in `weather.py`.
+# Run container  
+docker-compose up -d
+```
 
 ---
 
-##  Legal Pages  
+## Support
 
-For compliance, the app includes:  
-- [Privacy Policy](https://benavery28.github.io/Jobber-Quotes/privacy-policy.html)  
-- [Terms of Service](https://benavery28.github.io/Jobber-Quotes/terms-of-service.html)  
+### Legal Compliance
+
+- [Privacy Policy](https://benavery28.github.io/Jobber-Quotes/privacy-policy.html)
+- [Terms of Service](https://benavery28.github.io/Jobber-Quotes/terms-of-service.html)
+
+### Contact Information
+
+**Technical Support**: sales@shimmershine.org  
+**Business Inquiries**: sales@shimmershine.org
 
 ---
 
-For support or questions, email: sales@shimmershine.org
+## License
+
+This software is proprietary to **Shimmer & Shine Window Cleaning Ltd.** All rights reserved.
+
+---
+
+## Development Team
+
+**Developed by**: Ben & Andrei  
+**Company**: Shimmer & Shine Window Cleaning Ltd.
+
+---
