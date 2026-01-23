@@ -13,20 +13,37 @@ from src.db import get_visits, add_visit
 
 # 30-minute grace period between bookings
 WORK_START = 8  # 8 am
-WORK_END = 20  # 8 pm
+WORK_END = 20  # 8 pm (20:00)
 grace_period = timedelta(minutes=30)
+
+# List of holidays that will NEVER be booked (format: "YYYY-MM-DD")
+# Add dates like: "2026-06-28", "2026-12-25", etc.
+HOLIDAYS = [
+    # Example: "2026-06-28",
+    # Add more holidays as needed
+]
 
 
 def is_workday(d):
     """
-    Return True if the given date is a weekday (Mon–Fri) and not a holiday.
+    Return True if the given date is a weekday (Mon–Thu, excluding Fridays) and not a holiday.
+    Fridays are excluded as buffer days for rain/touchups.
     """
-    weekday = d.weekday()  # monday = 0, sunday = 6 ( will I ever get use to it? )
+    weekday = d.weekday()  # monday = 0, sunday = 6
+    
+    # Exclude weekends (Saturday=5, Sunday=6) and Fridays (Friday=4)
+    # Only Monday-Thursday are bookable (0-3)
+    is_weekday = weekday < 4  # Monday=0, Tuesday=1, Wednesday=2, Thursday=3
+    
+    if not is_weekday:
+        return False
+    
+    # Check if date is in holidays list
     date_str = d.strftime("%Y-%m-%d")
-
-    is_weekday = weekday < 5  # cause 5 and 6 are sat and sun !
-
-    return is_weekday
+    if date_str in HOLIDAYS:
+        return False
+    
+    return True
 
 
 def estimate_time(quote_cost: float):
@@ -54,7 +71,7 @@ def estimate_time(quote_cost: float):
     # remaining hours at $180/hour
     hours = remainder / 180  # remainder should always be divisible by 180 cleanly
 
-    total_hours = int(days) * 24 + int(chunks) * 4 + hours
+    total_hours = int(days) * 8 + int(chunks) * 4 + hours
     return timedelta(hours=total_hours)
 
 
@@ -81,9 +98,9 @@ def check_availability(start_time, duration, visits):
 def auto_book(visits, start_date, duration, city, client_id=None):
     """
     Find the next available slot for a job.
-    - Only books on weekdays
+    - Only books on weekdays (Mon–Thu, excluding Fridays)
     - Checks weather before booking
-    - Uses 30-min increments within 9–5
+    - Uses 30-min increments within 8am–8pm
     - Stops searching after 30 days
     Args:
         visits (list): Current bookings

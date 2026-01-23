@@ -1,4 +1,5 @@
 import os  # Added for TEST_MODE
+import asyncio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 import httpx
@@ -29,6 +30,7 @@ init_db()
 # -------------------
 app = FastAPI()
 VISITS = []  # in-memory booked jobs list
+BOOK_LOCK = asyncio.Lock()  # Lock to prevent double-booking races
 
 JOBBER_CLIENT_ID = os.getenv("JOBBER_CLIENT_ID")
 JOBBER_CLIENT_SECRET = os.getenv("JOBBER_CLIENT_SECRET")
@@ -42,6 +44,30 @@ if not JOBBER_CLIENT_SECRET:
 
 STATE = {"value": None}
 TOKENS = {}
+
+
+# -------------------
+# HELPER FUNCTIONS
+# -------------------
+def ceil_to_30(dt: datetime) -> datetime:
+    """
+    Round up datetime to the next 30-minute boundary.
+    Examples:
+        - 10:15 -> 10:30
+        - 10:30 -> 10:30 (no change)
+        - 10:31 -> 11:00
+        - 10:00 -> 10:00 (no change)
+    """
+    # If minutes are already 0 or 30, return as-is
+    if dt.minute == 0 or dt.minute == 30:
+        return dt.replace(second=0, microsecond=0)
+    
+    # Round up to next 30-minute boundary
+    if dt.minute < 30:
+        return dt.replace(minute=30, second=0, microsecond=0)
+    else:
+        # Round up to next hour
+        return (dt.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
 
 
 # -------------------
@@ -154,23 +180,35 @@ async def book_job_endpoint(request: Request):
     if estimated_duration == -1:
         raise HTTPException(status_code=400, detail="Invalid quote cost")
 
-    # find the next available slot
-    start_datetime = datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
-    while not is_workday(start_datetime):
-        start_datetime += timedelta(days=1)
-
+    # find the next available slot - start from now rounded up to next 30-min boundary
     city = "Saskatoon"
+    
+    # Use lock to prevent double-booking races
+    async with BOOK_LOCK:
+        # Start from now, rounded up to next 30-minute boundary
+        start_datetime = ceil_to_30(datetime.now())
+        
+        # If rounded time is before 8am, set to 8am
+        if start_datetime.hour < 8:
+            start_datetime = start_datetime.replace(hour=8, minute=0, second=0, microsecond=0)
+        # If rounded time is at or after 8pm, move to next day at 8am
+        elif start_datetime.hour >= 20:
+            start_datetime = (start_datetime + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+        
+        # Advance to next workday if needed (Mon-Thu, excluding Fridays and holidays)
+        while not is_workday(start_datetime):
+            start_datetime = (start_datetime + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
 
-    visits = get_visits()
-    slot = auto_book(visits, start_datetime, estimated_duration, city, client_id)
-    if not slot:
-        raise HTTPException(status_code=400, detail="No available slot")
+        visits = get_visits()
+        slot = auto_book(visits, start_datetime, estimated_duration, city, client_id)
+        if not slot:
+            raise HTTPException(status_code=400, detail="No available slot")
 
-    start_slot = slot["startAt"]
-    end_slot = slot["endAt"]
+        start_slot = slot["startAt"]
+        end_slot = slot["endAt"]
 
-    # Pass client_id to add_visit
-    add_visit(start_slot, end_slot, client_id)
+        # Pass client_id to add_visit
+        add_visit(start_slot, end_slot, client_id)
 
     job_response = await create_job(f"Quote {quote_id}", start_slot, end_slot,
                                     access_token=access or "mock_access_token")

@@ -34,3 +34,13 @@ out/
 build/
 dist/
 *.egg-info/
+
+# local keys
+Shimmer&Shine
+Shimmer&Shine.pub
+*.pem
+*.key
+
+# local database
+jobber_calendar.db
+*.db

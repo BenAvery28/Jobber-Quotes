@@ -51,7 +51,7 @@ def get_hourly_forecast(city, days_ahead=4):
         return None
 
 
-def check_weather(city, date, start_hour=9, end_hour=17):
+def check_weather(city, date, start_hour=8, end_hour=20):
     """
     Check if weather conditions are suitable for a job on a given date and time range.
     Uses free 5-day forecast API with 3-hour intervals.
@@ -59,8 +59,8 @@ def check_weather(city, date, start_hour=9, end_hour=17):
     Args:
         city (str): City name
         date (datetime): Date to check
-        start_hour (int): Start hour (default 9 AM)
-        end_hour (int): End hour (default 5 PM)
+        start_hour (int): Start hour (default 8 AM)
+        end_hour (int): End hour (default 8 PM)
     """
     forecast = get_hourly_forecast(city, days_ahead=4)
     if not forecast or 'list' not in forecast:
@@ -105,8 +105,8 @@ def get_next_suitable_weather_slot(city, start_datetime, duration_hours):
     for item in forecast['list']:
         forecast_time = datetime.fromtimestamp(item["dt"]).replace(tzinfo=None)
 
-        # Skip times before our start time or outside work hours (9-5)
-        if forecast_time < start_datetime or forecast_time.hour < 9 or forecast_time.hour >= 17:
+        # Skip times before our start time or outside work hours (8am-8pm)
+        if forecast_time < start_datetime or forecast_time.hour < 8 or forecast_time.hour >= 20:
             continue
 
         # Check if this time has suitable weather
