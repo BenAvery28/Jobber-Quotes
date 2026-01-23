@@ -13,7 +13,7 @@ from src.db import get_visits, add_visit
 
 # 30-minute grace period between bookings
 WORK_START = 8  # 8 am
-WORK_END = 20  # 8 pm (20:00)
+WORK_END = 20  # 8 pm
 grace_period = timedelta(minutes=30)
 
 # List of holidays that will NEVER be booked (format: "YYYY-MM-DD")
