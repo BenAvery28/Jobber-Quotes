@@ -12,8 +12,8 @@ from src.api.weather import check_weather
 from src.db import get_visits, add_visit
 
 # 30-minute grace period between bookings
-WORK_START = 9  # 9 am
-WORK_END = 17  # 5 pm
+WORK_START = 8  # 8 am
+WORK_END = 20  # 8 pm
 grace_period = timedelta(minutes=30)
 
 

@@ -10,8 +10,9 @@ from src.api.rescheduler import cancel_appointment, run_daily_weather_check, com
 from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_KEY
 import secrets
 from fastapi.responses import HTMLResponse
-from testing.mock_data import generate_mock_webhook  # Already there
-from src.db import init_db, get_visits, add_visit  # Already there
+from testing.mock_data import generate_mock_webhook
+from src.db import init_db, get_visits, add_visit, get_processed_quote, mark_quote_processed
+
 
 
 # -------------------
@@ -103,6 +104,17 @@ async def book_job_endpoint(request: Request):
         if cost is None:
             raise HTTPException(status_code=400, detail="Missing Cost")
 
+        existing = get_processed_quote(quote_id)
+        if existing:
+            return JSONResponse({
+                "status": f"Quote {quote_id} already scheduled",
+                "scheduled_start": existing["start_at"],
+                "scheduled_end": existing["end_at"],
+                "job_id": existing["job_id"],
+                "client_id": existing["client_id"],
+                "idempotent": True
+            })
+
     except HTTPException:
         raise
     except Exception as e:
@@ -163,6 +175,21 @@ async def book_job_endpoint(request: Request):
     job_response = await create_job(f"Quote {quote_id}", start_slot, end_slot,
                                     access_token=access or "mock_access_token")
     job_id = job_response["data"]["jobCreate"]["job"]["id"]
+
+    try:
+        mark_quote_processed(quote_id, client_id, job_id, start_slot, end_slot)
+    except sqlite3.IntegrityError:
+        # Another worker processed it first. Return idempotent response.
+        existing = get_processed_quote(quote_id)
+        return JSONResponse({
+            "status": f"Quote {quote_id} already scheduled",
+            "scheduled_start": existing["start_at"],
+            "scheduled_end": existing["end_at"],
+            "job_id": existing["job_id"],
+            "client_id": existing["client_id"],
+            "idempotent": True
+        })
+
     await notify_team(job_id, f"Job scheduled: Quote {quote_id} for client {client_id} at {start_slot}",
                       access_token=access or "mock_access_token")
     await notify_client(job_id, f"Your job is booked for {start_slot} to {end_slot}",

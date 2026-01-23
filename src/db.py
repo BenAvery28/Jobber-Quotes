@@ -15,6 +15,7 @@ def init_db():
       - start_time: start time for the job (ISO timestamp)
       - finish_time: finish time of the job (ISO timestamp)
     """
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS calander (
@@ -25,6 +26,16 @@ def init_db():
                 finish_time TEXT NOT NULL
             )
         """)
+    conn.execute("""
+                CREATE TABLE IF NOT EXISTS processed_quotes (
+                    quote_id TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    job_id TEXT NOT NULL,
+                    start_at TEXT NOT NULL,
+                    end_at TEXT NOT NULL,
+                    processed_at TEXT NOT NULL
+                )
+            """)
 
 
 def get_visits():
@@ -96,3 +107,38 @@ def get_booked_days_in_current_month() -> int:
         """, (month_start, month_end))
         result = cursor.fetchone()[0]
         return result
+
+def get_processed_quote(quote_id: str):
+    """
+    Returns processed quote row if it exists, else None.
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute("""
+            SELECT quote_id, client_id, job_id, start_at, end_at, processed_at
+            FROM processed_quotes
+            WHERE quote_id = ?
+        """, (quote_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "quote_id": row[0],
+            "client_id": row[1],
+            "job_id": row[2],
+            "start_at": row[3],
+            "end_at": row[4],
+            "processed_at": row[5],
+        }
+
+def mark_quote_processed(quote_id: str, client_id: str, job_id: str, start_at: str, end_at: str):
+    """
+    Mark a quote as processed. Safe if called once; will raise if duplicate quote_id.
+    """
+    processed_at = datetime.now().isoformat()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            INSERT INTO processed_quotes (quote_id, client_id, job_id, start_at, end_at, processed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (quote_id, client_id, job_id, start_at, end_at, processed_at))
+        conn.commit()
+
