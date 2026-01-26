@@ -8,6 +8,7 @@ from src.api.scheduler import auto_book, is_workday, estimate_time
 from src.api.jobber_client import create_job, notify_team, notify_client
 from src.api.rescheduler import cancel_appointment, run_daily_weather_check, compact_schedule, \
     check_weather_impact_on_schedule
+from src.api.job_classifier import classify_job_tag
 from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_KEY
 import secrets
 from fastapi.responses import HTMLResponse
@@ -121,7 +122,24 @@ async def book_job_endpoint(request: Request):
         quote_id = data.get("id")
         status = data.get("quoteStatus")
         cost = data.get("amounts", {}).get("totalPrice")
-        client_id = data.get("client", {}).get("id", "C123")  # Extract client ID
+        client_data = data.get("client", {})
+        client_id = client_data.get("id", "C123")  # Extract client ID
+        client_name = client_data.get("name", "")
+        
+        # Extract address information for job classification
+        properties = client_data.get("properties", [])
+        address = ""
+        if properties and len(properties) > 0:
+            # Try to get address from first property
+            prop = properties[0]
+            address_parts = []
+            if prop.get("address"):
+                address_parts.append(prop.get("address"))
+            if prop.get("address2"):
+                address_parts.append(prop.get("address2"))
+            if prop.get("city"):
+                address_parts.append(prop.get("city"))
+            address = ", ".join(address_parts)
 
         if not quote_id:
             raise HTTPException(status_code=400, detail="Missing Quote ID")
@@ -129,6 +147,9 @@ async def book_job_endpoint(request: Request):
             raise HTTPException(status_code=400, detail="Missing Quote Status")
         if cost is None:
             raise HTTPException(status_code=400, detail="Missing Cost")
+        
+        # Classify job tag (commercial vs residential)
+        job_tag = classify_job_tag(address=address, client_name=client_name, quote_amount=cost)
 
         existing = get_processed_quote(quote_id)
         if existing:
@@ -154,7 +175,21 @@ async def book_job_endpoint(request: Request):
                     quote_id = data.get("id")
                     status = data.get("quoteStatus")
                     cost = data.get("amounts", {}).get("totalPrice")
-                    client_id = data.get("client", {}).get("id", "C123")
+                    client_data = data.get("client", {})
+                    client_id = client_data.get("id", "C123")
+                    client_name = client_data.get("name", "")
+                    properties = client_data.get("properties", [])
+                    address = ""
+                    if properties and len(properties) > 0:
+                        prop = properties[0]
+                        address_parts = []
+                        if prop.get("address"):
+                            address_parts.append(prop.get("address"))
+                        if prop.get("city"):
+                            address_parts.append(prop.get("city"))
+                        address = ", ".join(address_parts)
+                    # Classify job tag
+                    job_tag = classify_job_tag(address=address, client_name=client_name, quote_amount=cost)
                 else:
                     raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {e}")
             except:
@@ -207,8 +242,8 @@ async def book_job_endpoint(request: Request):
         start_slot = slot["startAt"]
         end_slot = slot["endAt"]
 
-        # Pass client_id to add_visit
-        add_visit(start_slot, end_slot, client_id)
+        # Pass client_id and job_tag to add_visit
+        add_visit(start_slot, end_slot, client_id, job_tag)
 
     job_response = await create_job(f"Quote {quote_id}", start_slot, end_slot,
                                     access_token=access or "mock_access_token")
@@ -240,7 +275,8 @@ async def book_job_endpoint(request: Request):
         "visits_count": len(get_visits()),
         "cost": cost,
         "job_id": job_id,
-        "client_id": client_id
+        "client_id": client_id,
+        "job_tag": job_tag
     })
 
 

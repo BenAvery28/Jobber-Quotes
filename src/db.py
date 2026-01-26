@@ -23,9 +23,16 @@ def init_db():
                 date TEXT NOT NULL,
                 client_id TEXT NOT NULL,
                 start_time TEXT NOT NULL,
-                finish_time TEXT NOT NULL
+                finish_time TEXT NOT NULL,
+                job_tag TEXT DEFAULT 'residential'
             )
         """)
+        # Add job_tag column if it doesn't exist (migration for existing databases)
+        try:
+            conn.execute("ALTER TABLE calander ADD COLUMN job_tag TEXT DEFAULT 'residential'")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore
+            pass
     conn.execute("""
                 CREATE TABLE IF NOT EXISTS processed_quotes (
                     quote_id TEXT PRIMARY KEY,
@@ -41,29 +48,39 @@ def init_db():
 def get_visits():
     """
     Fetch all bookings from the calander.
-    Returns: list of dicts {date, client_id, startAt, endAt}
+    Returns: list of dicts {date, client_id, startAt, endAt, job_tag}
     """
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("SELECT date, client_id, start_time, finish_time FROM calander")
+        cursor = conn.execute("SELECT date, client_id, start_time, finish_time, COALESCE(job_tag, 'residential') FROM calander")
         return [
-            {"date": date, "client_id": client_id, "startAt": start_time, "endAt": finish_time}
-            for date, client_id, start_time, finish_time in cursor.fetchall()
+            {"date": date, "client_id": client_id, "startAt": start_time, "endAt": finish_time, "job_tag": job_tag or "residential"}
+            for date, client_id, start_time, finish_time, job_tag in cursor.fetchall()
         ]
 
 
-def add_visit(start_at: str, end_at: str, client_id: str = None):
+def add_visit(start_at: str, end_at: str, client_id: str = None, job_tag: str = "residential"):
     """
     Add a visit (job booking) to the calander.
     The date is extracted from start_at (YYYY-MM-DD).
+    
+    Args:
+        start_at: Start time (ISO format)
+        end_at: End time (ISO format)
+        client_id: Client ID from Jobber
+        job_tag: Job classification ('commercial' or 'residential', default 'residential')
     """
     job_date = datetime.fromisoformat(start_at).strftime("%Y-%m-%d")
     if client_id is None:
         client_id = "C123"  # Default client ID for backward compatibility
+    
+    # Ensure job_tag is valid
+    if job_tag not in ["commercial", "residential"]:
+        job_tag = "residential"
 
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT INTO calander (date, client_id, start_time, finish_time) VALUES (?, ?, ?, ?)",
-            (job_date, client_id, start_at, end_at),
+            "INSERT INTO calander (date, client_id, start_time, finish_time, job_tag) VALUES (?, ?, ?, ?, ?)",
+            (job_date, client_id, start_at, end_at, job_tag),
         )
         conn.commit()
 
