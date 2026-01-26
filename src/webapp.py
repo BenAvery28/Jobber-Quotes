@@ -9,6 +9,9 @@ from src.api.jobber_client import create_job, notify_team, notify_client
 from src.api.rescheduler import cancel_appointment, run_daily_weather_check, compact_schedule, \
     check_weather_impact_on_schedule, recheck_tentative_bookings
 from src.api.job_classifier import classify_job_tag
+from src.api.recurring_jobs import create_recurring_job, generate_bookings_from_recurring_job, \
+    book_entire_summer
+from src.db import get_recurring_jobs, deactivate_recurring_job
 from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_KEY
 import secrets
 from fastapi.responses import HTMLResponse
@@ -412,6 +415,175 @@ async def get_schedule_status():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Schedule status failed: {e}")
+
+
+@app.post("/recurring-jobs")
+async def create_recurring_job_endpoint(request: Request):
+    """
+    Create a recurring job template and optionally book the entire summer.
+    Payload:
+    {
+        "client_id": "C123",
+        "day_of_week": 0,  # 0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday
+        "start_time": "10:00",  # HH:MM format
+        "duration_hours": 2.0,
+        "start_date": "2025-06-01",  # YYYY-MM-DD (optional, defaults to first Monday of month)
+        "end_date": "2025-08-31",  # YYYY-MM-DD (optional, defaults to Aug 31)
+        "job_tag": "residential",  # optional
+        "book_now": true  # If true, immediately generate all bookings
+    }
+    """
+    try:
+        data = await request.json()
+        
+        client_id = data.get("client_id")
+        day_of_week = data.get("day_of_week")
+        start_time = data.get("start_time")
+        duration_hours = data.get("duration_hours")
+        start_date = data.get("start_date")
+        end_date = data.get("end_date")
+        job_tag = data.get("job_tag", "residential")
+        book_now = data.get("book_now", False)
+        
+        if not client_id:
+            raise HTTPException(status_code=400, detail="Missing client_id")
+        if day_of_week is None:
+            raise HTTPException(status_code=400, detail="Missing day_of_week")
+        if not start_time:
+            raise HTTPException(status_code=400, detail="Missing start_time")
+        if duration_hours is None:
+            raise HTTPException(status_code=400, detail="Missing duration_hours")
+        
+        if day_of_week not in [0, 1, 2, 3]:
+            raise HTTPException(status_code=400, detail="day_of_week must be 0-3 (Mon-Thu)")
+        
+        # Create recurring job
+        recurring_job_id = create_recurring_job(
+            client_id, day_of_week, start_time, duration_hours,
+            start_date or None, end_date or None, job_tag
+        )
+        
+        result = {
+            "recurring_job_id": recurring_job_id,
+            "client_id": client_id,
+            "day_of_week": day_of_week,
+            "start_time": start_time,
+            "duration_hours": duration_hours,
+            "job_tag": job_tag
+        }
+        
+        # If book_now is True, generate all bookings immediately
+        if book_now:
+            booking_result = generate_bookings_from_recurring_job(
+                recurring_job_id, city="Saskatoon", check_weather=True, skip_conflicts=True
+            )
+            result["bookings_generated"] = booking_result
+        
+        return JSONResponse(result)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create recurring job: {e}")
+
+
+@app.get("/recurring-jobs")
+async def list_recurring_jobs(client_id: str = None, active_only: bool = True):
+    """
+    List recurring job templates.
+    Query params:
+        client_id: Filter by client ID (optional)
+        active_only: Only show active recurring jobs (default True)
+    """
+    try:
+        recurring_jobs = get_recurring_jobs(client_id=client_id, active_only=active_only)
+        return JSONResponse({
+            "count": len(recurring_jobs),
+            "recurring_jobs": recurring_jobs
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list recurring jobs: {e}")
+
+
+@app.post("/recurring-jobs/{recurring_job_id}/generate-bookings")
+async def generate_bookings_endpoint(recurring_job_id: int):
+    """
+    Generate individual bookings from a recurring job template.
+    Books all occurrences between start_date and end_date.
+    """
+    try:
+        result = generate_bookings_from_recurring_job(
+            recurring_job_id, city="Saskatoon", check_weather=True, skip_conflicts=True
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate bookings: {e}")
+
+
+@app.post("/recurring-jobs/{recurring_job_id}/deactivate")
+async def deactivate_recurring_job_endpoint(recurring_job_id: int):
+    """
+    Deactivate a recurring job (soft delete).
+    """
+    try:
+        updated = deactivate_recurring_job(recurring_job_id)
+        if updated == 0:
+            raise HTTPException(status_code=404, detail=f"Recurring job {recurring_job_id} not found")
+        return JSONResponse({
+            "recurring_job_id": recurring_job_id,
+            "status": "deactivated"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to deactivate recurring job: {e}")
+
+
+@app.post("/recurring-jobs/book-summer")
+async def book_entire_summer_endpoint(request: Request):
+    """
+    Convenience endpoint to create a recurring job and book the entire summer in one call.
+    Payload:
+    {
+        "client_id": "C123",
+        "day_of_week": 0,  # 0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday
+        "start_time": "10:00",  # HH:MM format
+        "duration_hours": 2.0,
+        "job_tag": "residential",  # optional
+        "start_date": "2025-06-01",  # optional
+        "end_date": "2025-08-31"  # optional
+    }
+    """
+    try:
+        data = await request.json()
+        
+        client_id = data.get("client_id")
+        day_of_week = data.get("day_of_week")
+        start_time = data.get("start_time")
+        duration_hours = data.get("duration_hours")
+        job_tag = data.get("job_tag", "residential")
+        start_date = data.get("start_date")
+        end_date = data.get("end_date")
+        
+        if not client_id:
+            raise HTTPException(status_code=400, detail="Missing client_id")
+        if day_of_week is None:
+            raise HTTPException(status_code=400, detail="Missing day_of_week")
+        if not start_time:
+            raise HTTPException(status_code=400, detail="Missing start_time")
+        if duration_hours is None:
+            raise HTTPException(status_code=400, detail="Missing duration_hours")
+        
+        if day_of_week not in [0, 1, 2, 3]:
+            raise HTTPException(status_code=400, detail="day_of_week must be 0-3 (Mon-Thu)")
+        
+        result = book_entire_summer(
+            client_id, day_of_week, start_time, duration_hours,
+            job_tag, start_date, end_date
+        )
+        
+        return JSONResponse(result)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to book summer: {e}")
 
 
 @app.get("/")

@@ -49,6 +49,22 @@ def init_db():
                     processed_at TEXT NOT NULL
                 )
             """)
+    # Recurring jobs table - holds templates for recurring jobs
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recurring_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id TEXT NOT NULL,
+            job_tag TEXT DEFAULT 'residential',
+            day_of_week INTEGER NOT NULL,
+            start_time TEXT NOT NULL,
+            duration_hours REAL NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            UNIQUE(client_id, day_of_week, start_time)
+        )
+    """)
 
 
 def get_visits(include_tentative=True):
@@ -243,4 +259,119 @@ def mark_quote_processed(quote_id: str, client_id: str, job_id: str, start_at: s
             VALUES (?, ?, ?, ?, ?, ?)
         """, (quote_id, client_id, job_id, start_at, end_at, processed_at))
         conn.commit()
+
+
+# -------------------
+# RECURRING JOBS FUNCTIONS
+# -------------------
+
+def create_recurring_job(client_id: str, day_of_week: int, start_time: str, duration_hours: float,
+                        start_date: str, end_date: str, job_tag: str = "residential"):
+    """
+    Create a recurring job template.
+    
+    Args:
+        client_id: Client ID from Jobber
+        day_of_week: Day of week (0=Monday, 1=Tuesday, ..., 3=Thursday)
+        start_time: Start time in HH:MM format (e.g., "10:00")
+        duration_hours: Duration in hours (e.g., 2.0)
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        job_tag: Job classification ('commercial' or 'residential')
+    
+    Returns:
+        int: ID of the created recurring job
+    """
+    if job_tag not in ["commercial", "residential"]:
+        job_tag = "residential"
+    
+    created_at = datetime.now().isoformat()
+    
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("""
+            INSERT INTO recurring_jobs 
+            (client_id, job_tag, day_of_week, start_time, duration_hours, start_date, end_date, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (client_id, job_tag, day_of_week, start_time, duration_hours, start_date, end_date, created_at))
+        conn.commit()
+        return cursor.lastrowid
+
+
+def get_recurring_jobs(client_id: str = None, active_only: bool = True):
+    """
+    Get recurring job templates.
+    
+    Args:
+        client_id: If provided, filter by client_id
+        active_only: If True, only return active recurring jobs
+    
+    Returns:
+        list: List of recurring job dicts
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        if client_id:
+            if active_only:
+                cursor = conn.execute("""
+                    SELECT id, client_id, job_tag, day_of_week, start_time, duration_hours,
+                           start_date, end_date, created_at, is_active
+                    FROM recurring_jobs
+                    WHERE client_id = ? AND is_active = 1
+                """, (client_id,))
+            else:
+                cursor = conn.execute("""
+                    SELECT id, client_id, job_tag, day_of_week, start_time, duration_hours,
+                           start_date, end_date, created_at, is_active
+                    FROM recurring_jobs
+                    WHERE client_id = ?
+                """, (client_id,))
+        else:
+            if active_only:
+                cursor = conn.execute("""
+                    SELECT id, client_id, job_tag, day_of_week, start_time, duration_hours,
+                           start_date, end_date, created_at, is_active
+                    FROM recurring_jobs
+                    WHERE is_active = 1
+                """)
+            else:
+                cursor = conn.execute("""
+                    SELECT id, client_id, job_tag, day_of_week, start_time, duration_hours,
+                           start_date, end_date, created_at, is_active
+                    FROM recurring_jobs
+                """)
+        
+        return [
+            {
+                "id": row[0],
+                "client_id": row[1],
+                "job_tag": row[2],
+                "day_of_week": row[3],
+                "start_time": row[4],
+                "duration_hours": row[5],
+                "start_date": row[6],
+                "end_date": row[7],
+                "created_at": row[8],
+                "is_active": bool(row[9])
+            }
+            for row in cursor.fetchall()
+        ]
+
+
+def deactivate_recurring_job(recurring_job_id: int):
+    """
+    Deactivate a recurring job (soft delete).
+    
+    Args:
+        recurring_job_id: ID of recurring job to deactivate
+    
+    Returns:
+        int: Number of rows updated
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("""
+            UPDATE recurring_jobs
+            SET is_active = 0
+            WHERE id = ?
+        """, (recurring_job_id,))
+        conn.commit()
+        return cursor.rowcount
 
