@@ -12,7 +12,7 @@ from src.api.rescheduler import cancel_appointment, run_daily_weather_check, com
 from src.api.job_classifier import classify_job_tag, get_crew_for_tag
 from src.api.recurring_jobs import create_recurring_job, generate_bookings_from_recurring_job, \
     book_entire_summer
-from src.api.webhook_verify import verify_jobber_webhook, parse_webhook_payload, QUOTE_TOPICS
+from src.api.webhook_verify import verify_jobber_webhook, parse_webhook_payload, QUOTE_TOPICS, validate_webhook_app_id
 from src.db import get_recurring_jobs, deactivate_recurring_job
 from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_KEY
 import secrets
@@ -336,9 +336,14 @@ async def jobber_webhook_endpoint(request: Request):
     webhook_event = parse_webhook_payload(data)
     topic = webhook_event.get("topic")
     item_id = webhook_event.get("item_id")
+    app_id = webhook_event.get("app_id")
     
     if not topic or not item_id:
         raise HTTPException(status_code=400, detail="Missing topic or itemId in webhook")
+    
+    # Optional: Validate app_id matches our client ID (additional security layer)
+    if not validate_webhook_app_id(app_id):
+        raise HTTPException(status_code=401, detail="Invalid appId in webhook")
     
     # ----------------------
     # Step 3: Handle different webhook topics
@@ -352,7 +357,7 @@ async def jobber_webhook_endpoint(request: Request):
             "topic": topic
         })
     
-    # Check if we've already processed this quote (idempotency)
+    # Early idempotency check with item_id (before API call)
     existing = get_processed_quote(item_id)
     if existing:
         return JSONResponse({
@@ -383,6 +388,19 @@ async def jobber_webhook_endpoint(request: Request):
     # ----------------------
     quote_id = quote.get("id", item_id)
     quote_status = quote.get("quoteStatus", "").lower()
+    
+    # Re-check idempotency with actual quote_id (in case item_id != quote_id)
+    if quote_id != item_id:
+        existing = get_processed_quote(quote_id)
+        if existing:
+            return JSONResponse({
+                "status": f"Quote {quote_id} already scheduled",
+                "scheduled_start": existing["start_at"],
+                "scheduled_end": existing["end_at"],
+                "job_id": existing["job_id"],
+                "client_id": existing["client_id"],
+                "idempotent": True
+            })
     cost = quote.get("amounts", {}).get("totalPrice", 0)
     
     client_data = quote.get("client", {})
@@ -461,7 +479,10 @@ async def jobber_webhook_endpoint(request: Request):
     job = await client.create_job(job_title, client_id, property_id)
     job_id = job.get("id", f"J_{quote_id}")
     
-    # Create visit in Jobber
+    # Create visit in Jobber - must succeed before marking as processed
+    # If this fails, we rollback the local booking to allow retry
+    visit_created = False
+    visit_id = None
     try:
         visit = await client.create_visit(
             job_id=job_id,
@@ -469,14 +490,23 @@ async def jobber_webhook_endpoint(request: Request):
             end_at=end_slot,
             title=job_title
         )
+        visit_id = visit.get("id") if visit else None
+        visit_created = True
     except Exception as e:
-        # Log error but don't fail - local booking is done
-        print(f"Warning: Could not create visit in Jobber: {e}")
+        # Visit creation failed - rollback local booking to allow retry
+        from src.db import remove_visit_by_name
+        remove_visit_by_name(client_id)
+        print(f"Error: Could not create visit in Jobber: {e}. Local booking rolled back.")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create visit in Jobber. Booking rolled back. Error: {e}"
+        )
     
-    # Mark quote as processed
+    # Only mark as processed after visit creation succeeds
     try:
         mark_quote_processed(quote_id, client_id, job_id, start_slot, end_slot)
     except sqlite3.IntegrityError:
+        # Another worker processed it first - return idempotent response
         existing = get_processed_quote(quote_id)
         return JSONResponse({
             "status": f"Quote {quote_id} already scheduled",

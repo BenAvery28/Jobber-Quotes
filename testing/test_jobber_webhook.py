@@ -219,3 +219,31 @@ class TestSignatureCalculation:
             # And a wrong signature fails
             assert verify_jobber_webhook(payload, "wrong") is False
 
+
+class TestWebhookAppIdValidation:
+    """Tests for appId validation."""
+    
+    def test_validate_app_id_matches_client_id(self):
+        """App ID should match client ID when both are provided."""
+        from src.api.webhook_verify import validate_webhook_app_id
+        
+        with mock.patch('src.api.webhook_verify.JOBBER_CLIENT_ID', 'test_client_123'):
+            assert validate_webhook_app_id('test_client_123') is True
+            assert validate_webhook_app_id('wrong_id') is False
+    
+    def test_validate_app_id_skips_when_no_client_id(self):
+        """Validation should pass when no client ID is configured."""
+        from src.api.webhook_verify import validate_webhook_app_id
+        
+        with mock.patch('src.api.webhook_verify.JOBBER_CLIENT_ID', None):
+            assert validate_webhook_app_id('any_app_id') is True
+            assert validate_webhook_app_id(None) is True
+    
+    def test_validate_app_id_allows_missing_app_id(self):
+        """Validation should pass when app_id is missing (optional field)."""
+        from src.api.webhook_verify import validate_webhook_app_id
+        
+        with mock.patch('src.api.webhook_verify.JOBBER_CLIENT_ID', 'test_client_123'):
+            assert validate_webhook_app_id(None) is True
+            assert validate_webhook_app_id('') is True
+

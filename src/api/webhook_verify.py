@@ -6,7 +6,7 @@
 import hmac
 import hashlib
 import base64
-from config.settings import JOBBER_CLIENT_SECRET
+from config.settings import JOBBER_CLIENT_SECRET, JOBBER_CLIENT_ID
 
 
 def verify_jobber_webhook(payload: bytes, signature_header: str) -> bool:
@@ -69,6 +69,32 @@ def parse_webhook_payload(data: dict) -> dict:
         "app_id": webhook_event.get("appId"),
         "occurred_at": webhook_event.get("occurredAt"),
     }
+
+
+def validate_webhook_app_id(app_id: str) -> bool:
+    """
+    Validate that webhook appId matches our configured client ID (optional).
+    This provides an additional layer of security beyond signature verification.
+    
+    Args:
+        app_id: The appId from the webhook event
+        
+    Returns:
+        True if validation passes or is skipped, False if validation fails
+    """
+    if not JOBBER_CLIENT_ID:
+        # No client ID configured, skip validation
+        return True
+    
+    if not app_id:
+        # Missing app_id in webhook - this might be expected for some events
+        # Return True to allow processing (signature verification is primary check)
+        return True
+    
+    # If app_id is provided, it should match our client ID
+    # Note: This is optional - Jobber may not always include appId
+    # Signature verification is the primary security mechanism
+    return app_id == JOBBER_CLIENT_ID
 
 
 # Webhook topics we care about (based on WebHookTopicEnum)
