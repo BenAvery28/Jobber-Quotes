@@ -1,6 +1,8 @@
 import os  # Added for TEST_MODE
 import asyncio
 import sqlite3
+import json
+from urllib.parse import parse_qs, unquote
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse
 import httpx
@@ -334,6 +336,10 @@ async def process_webhook_background(
     """
     Background task to process webhook after returning 202 to Jobber.
     This prevents webhook timeouts and allows proper retry handling.
+    
+    Note: Jobber requires webhook responses within 1 second, so we return 202
+    immediately and process asynchronously. This also handles at-least-once
+    delivery semantics (webhooks may be sent multiple times).
     """
     try:
         logger.info(f"Processing webhook in background for quote {quote_id}")
@@ -422,7 +428,11 @@ async def jobber_webhook_endpoint(request: Request, background_tasks: Background
     """
     Production webhook endpoint for Jobber events.
     
-    Jobber sends webhooks in this format:
+    IMPORTANT: Jobber requires webhook responses within 1 second. This endpoint
+    returns 202 Accepted immediately and processes the webhook asynchronously
+    in a background task to meet this requirement.
+    
+    Jobber webhook format:
     {
         "data": {
             "webHookEvent": {
@@ -430,30 +440,59 @@ async def jobber_webhook_endpoint(request: Request, background_tasks: Background
                 "appId": "...",
                 "accountId": "...",
                 "itemId": "...",  # The quote/job/client ID
-                "occurredAt": "2021-08-12T16:31:36-06:00"
+                "occurredAt": "2021-08-12T16:31:36-06:00"  # or "occuredAt" for older apps
             }
         }
     }
     
+    Supports both:
+    - application/json (newer apps, after Apr 11, 2022)
+    - application/x-www-form-urlencoded (older apps, before Apr 11, 2022)
+    
+    Handles at-least-once delivery: webhooks may be sent multiple times, so
+    idempotency checks are performed before processing.
+    
     We then query the Jobber API to get full details.
     """
     # ----------------------
-    # Step 1: Verify webhook signature
+    # Step 1: Get raw body for signature verification (must be done before parsing)
+    # ----------------------
+    raw_body = await request.body()
+    
+    # ----------------------
+    # Step 2: Verify webhook signature
     # ----------------------
     if not in_test_mode():
-        raw_body = await request.body()
         signature = request.headers.get("X-Jobber-Hmac-SHA256", "")
         
         if not verify_jobber_webhook(raw_body, signature):
+            logger.warning("Invalid webhook signature - rejecting request")
             raise HTTPException(status_code=401, detail="Invalid webhook signature")
     
     # ----------------------
-    # Step 2: Parse webhook payload
+    # Step 3: Parse webhook payload (handle both JSON and form-urlencoded)
     # ----------------------
+    content_type = request.headers.get("content-type", "").lower()
+    
     try:
-        data = await request.json()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+        if "application/json" in content_type:
+            # Newer apps (after Apr 11, 2022) send JSON
+            data = json.loads(raw_body.decode('utf-8'))
+        elif "application/x-www-form-urlencoded" in content_type:
+            # Older apps (before Apr 11, 2022) send form-urlencoded
+            form_data = parse_qs(raw_body.decode('utf-8'))
+            # Jobber sends the payload in a 'data' field as a JSON string
+            if 'data' in form_data and form_data['data']:
+                data_str = unquote(form_data['data'][0])
+                data = json.loads(data_str)
+            else:
+                raise HTTPException(status_code=400, detail="Missing 'data' field in form-urlencoded payload")
+        else:
+            # Try JSON as fallback (for unknown content types)
+            data = json.loads(raw_body.decode('utf-8'))
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        logger.error(f"Failed to parse webhook payload: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Invalid webhook payload: {e}")
     
     webhook_event = parse_webhook_payload(data)
     topic = webhook_event.get("topic")

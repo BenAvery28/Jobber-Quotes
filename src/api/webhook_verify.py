@@ -52,22 +52,27 @@ def parse_webhook_payload(data: dict) -> dict:
                 "appId": "...",
                 "accountId": "...",
                 "itemId": "...",  # This is the quote/job/client ID
-                "occurredAt": "2021-08-12T16:31:36-06:00"
+                "occurredAt": "2021-08-12T16:31:36-06:00"  # or "occuredAt" for older apps
             }
         }
     }
+    
+    Note: Older apps (before Dec 8, 2023) use "occuredAt" (typo), newer apps use "occurredAt"
     
     Returns:
         dict with topic, item_id, account_id, occurred_at
     """
     webhook_event = data.get("data", {}).get("webHookEvent", {})
     
+    # Handle both "occurredAt" (newer) and "occuredAt" (older apps, typo)
+    occurred_at = webhook_event.get("occurredAt") or webhook_event.get("occuredAt")
+    
     return {
         "topic": webhook_event.get("topic"),
         "item_id": webhook_event.get("itemId"),
         "account_id": webhook_event.get("accountId"),
         "app_id": webhook_event.get("appId"),
-        "occurred_at": webhook_event.get("occurredAt"),
+        "occurred_at": occurred_at,
     }
 
 
