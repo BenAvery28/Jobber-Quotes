@@ -6,10 +6,17 @@ Tests end-to-end flow from webhook receipt to database storage
 
 import pytest
 import os
+
+# Set environment variables BEFORE importing webapp
+os.environ["TEST_MODE"] = "True"
+os.environ["JOBBER_CLIENT_ID"] = "test_client_id"
+os.environ["JOBBER_CLIENT_SECRET"] = "test_secret_key"
+os.environ["OPENWEATHER_API_KEY"] = "test_weather_key"
+
 from fastapi.testclient import TestClient
 from datetime import datetime, timedelta
 from src.webapp import app
-from src.db import init_db, clear_visits, get_visits, get_booked_days_in_current_month
+from src.db import init_db, clear_visits, get_visits, get_booked_days_in_current_month, clear_processed_quotes
 from testing.mock_data import generate_test_webhook_variations, generate_mock_webhook
 
 client = TestClient(app)
@@ -23,6 +30,7 @@ class TestWebhookToCalanderFlow:
         os.environ["TEST_MODE"] = "True"  # Ensure test mode
         init_db()
         clear_visits()
+        clear_processed_quotes()  # Reset idempotency tracking
 
     def test_approved_quote_creates_calander_entry(self):
         """Test that approved quote creates proper calander entry"""
@@ -207,6 +215,7 @@ class TestCalanderDataConsistency:
         os.environ["TEST_MODE"] = "True"
         init_db()
         clear_visits()
+        clear_processed_quotes()  # Reset idempotency tracking
 
     def test_api_response_matches_database_entry(self):
         """Test that API response data exactly matches what's stored in database"""
@@ -289,6 +298,7 @@ class TestErrorHandlingWithCalander:
         os.environ["TEST_MODE"] = "True"
         init_db()
         clear_visits()
+        clear_processed_quotes()  # Reset idempotency tracking
 
     def test_invalid_payload_no_database_entry(self):
         """Test that invalid payloads don't create database entries"""

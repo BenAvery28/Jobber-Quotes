@@ -33,7 +33,9 @@ class TestCalanderDatabase:
             assert "client_id" in column_names
             assert "start_time" in column_names
             assert "finish_time" in column_names
-            assert len(column_names) == 5
+            assert "job_tag" in column_names
+            assert "booking_status" in column_names
+            assert len(column_names) == 7  # Updated: added job_tag and booking_status
 
     def test_add_single_visit(self):
         """Test adding a single visit with client_id"""

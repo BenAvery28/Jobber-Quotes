@@ -1,11 +1,28 @@
 # testing/test_book_job.py
 import pytest
 import os
+
+# Set environment variables BEFORE importing webapp
+os.environ["TEST_MODE"] = "True"
+os.environ["JOBBER_CLIENT_ID"] = "test_client_id"
+os.environ["JOBBER_CLIENT_SECRET"] = "test_secret_key"
+os.environ["OPENWEATHER_API_KEY"] = "test_weather_key"
+
 from fastapi.testclient import TestClient
 from src.webapp import app
+from src.db import init_db, clear_visits, clear_processed_quotes
 from testing.mock_data import generate_mock_webhook
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def clean_database():
+    """Clean database before each test to ensure isolation."""
+    init_db()
+    clear_visits()
+    clear_processed_quotes()
+    yield
 
 
 @pytest.fixture
@@ -68,16 +85,19 @@ def test_book_job_invalid_payload(no_test_mode):
 
 def test_book_job_unauthorized(no_test_mode):
     """
-    Tests unauthorized access:
+    Tests unauthorized access (when TEST_MODE is disabled):
       - Clears the in-memory token store (TOKENS)
       - Sends a booking request without proper auth
       - Expects a 401 Unauthorized response
+      
+    Note: The no_test_mode fixture disables TEST_MODE, otherwise
+    the endpoint allows requests without auth for testing purposes.
     """
-
     from src.webapp import TOKENS
     TOKENS.clear()
+    # When TEST_MODE=False and no token, should return 401
     response = client.post("/book-job", json=generate_mock_webhook()["data"])
-    assert response.status_code == 401
+    assert response.status_code == 401, f"Expected 401, got {response.status_code}: {response.json()}"
 
 
 def test_database_structure():

@@ -226,6 +226,17 @@ def get_booked_days_in_current_month() -> int:
         result = cursor.fetchone()[0]
         return result
 
+
+def clear_processed_quotes():
+    """
+    Remove all processed quote records (testing only).
+    Used to reset idempotency tracking between tests.
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM processed_quotes")
+        conn.commit()
+
+
 def get_processed_quote(quote_id: str):
     """
     Returns processed quote row if it exists, else None.

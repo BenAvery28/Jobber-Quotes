@@ -1,6 +1,7 @@
 # testing/mock_data.py
 import random
 from datetime import datetime, timedelta
+from typing import Optional
 
 
 def generate_mock_quote(quote_id=None):
@@ -53,15 +54,16 @@ def generate_mock_visits(count=5):
 
 def generate_mock_webhook(quote_id=None):
     """
-    Generate a mock webhook payload similar to what jobber sends when a quote is approved
-    returns:
+    Generate a mock webhook payload similar to what jobber sends when a quote is approved.
+    This is the LEGACY format used by /book-job endpoint for testing.
+    
+    Returns:
     dict containing:
         - id: "Q123" (default)
         - quoteStatus: "APPROVED"
         - amounts: totalPrice fixed at 500.00
         - client: mock client with ID and property with city "Saskatoon"
     """
-
     if quote_id is None or quote_id != "Q123":
         quote_id = "Q123"
     status = "APPROVED"
@@ -75,6 +77,33 @@ def generate_mock_webhook(quote_id=None):
             "client": {
                 "id": client_id,
                 "properties": [{"city": "Saskatoon"}]
+            }
+        }
+    }
+
+
+def generate_jobber_webhook(topic="QUOTE_APPROVED", item_id="Q123"):
+    """
+    Generate a mock webhook payload in Jobber's ACTUAL format.
+    
+    Jobber webhooks only contain IDs, not full data. The app must then
+    query the Jobber API to get full details.
+    
+    Args:
+        topic: Webhook topic (e.g., QUOTE_APPROVED, QUOTE_CREATE)
+        item_id: The ID of the item (quote, client, job) that triggered the event
+        
+    Returns:
+        dict in Jobber's webhook format
+    """
+    return {
+        "data": {
+            "webHookEvent": {
+                "topic": topic,
+                "appId": "test-app-id-123",
+                "accountId": "ACC123",
+                "itemId": item_id,
+                "occurredAt": datetime.now().isoformat()
             }
         }
     }

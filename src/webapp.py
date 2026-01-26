@@ -1,16 +1,18 @@
 import os  # Added for TEST_MODE
 import asyncio
+import sqlite3
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 import httpx
 from datetime import datetime, timedelta
 from src.api.scheduler import auto_book, is_workday, estimate_time
-from src.api.jobber_client import create_job, notify_team, notify_client
+from src.api.jobber_client import create_job, notify_team, notify_client, JobberClient
 from src.api.rescheduler import cancel_appointment, run_daily_weather_check, compact_schedule, \
     check_weather_impact_on_schedule, recheck_tentative_bookings
 from src.api.job_classifier import classify_job_tag
 from src.api.recurring_jobs import create_recurring_job, generate_bookings_from_recurring_job, \
     book_entire_summer
+from src.api.webhook_verify import verify_jobber_webhook, parse_webhook_payload, QUOTE_TOPICS
 from src.db import get_recurring_jobs, deactivate_recurring_job
 from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_KEY
 import secrets
@@ -284,6 +286,216 @@ async def book_job_endpoint(request: Request):
         "job_tag": job_tag,
         "booking_status": booking_status,
         "weather_confidence": weather_confidence
+    })
+
+
+# -------------------
+# JOBBER WEBHOOK ENDPOINT (Production)
+# -------------------
+@app.post("/webhook/jobber")
+async def jobber_webhook_endpoint(request: Request):
+    """
+    Production webhook endpoint for Jobber events.
+    
+    Jobber sends webhooks in this format:
+    {
+        "data": {
+            "webHookEvent": {
+                "topic": "QUOTE_APPROVED",
+                "appId": "...",
+                "accountId": "...",
+                "itemId": "...",  # The quote/job/client ID
+                "occurredAt": "2021-08-12T16:31:36-06:00"
+            }
+        }
+    }
+    
+    We then query the Jobber API to get full details.
+    """
+    # ----------------------
+    # Step 1: Verify webhook signature
+    # ----------------------
+    if not in_test_mode():
+        raw_body = await request.body()
+        signature = request.headers.get("X-Jobber-Hmac-SHA256", "")
+        
+        if not verify_jobber_webhook(raw_body, signature):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    
+    # ----------------------
+    # Step 2: Parse webhook payload
+    # ----------------------
+    try:
+        data = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+    
+    webhook_event = parse_webhook_payload(data)
+    topic = webhook_event.get("topic")
+    item_id = webhook_event.get("item_id")
+    
+    if not topic or not item_id:
+        raise HTTPException(status_code=400, detail="Missing topic or itemId in webhook")
+    
+    # ----------------------
+    # Step 3: Handle different webhook topics
+    # ----------------------
+    
+    # Only process quote-related topics
+    if topic not in QUOTE_TOPICS:
+        return JSONResponse({
+            "status": "ignored",
+            "reason": f"Topic {topic} not handled",
+            "topic": topic
+        })
+    
+    # Check if we've already processed this quote (idempotency)
+    existing = get_processed_quote(item_id)
+    if existing:
+        return JSONResponse({
+            "status": f"Quote {item_id} already scheduled",
+            "scheduled_start": existing["start_at"],
+            "scheduled_end": existing["end_at"],
+            "job_id": existing["job_id"],
+            "client_id": existing["client_id"],
+            "idempotent": True
+        })
+    
+    # ----------------------
+    # Step 4: Get access token and fetch quote details
+    # ----------------------
+    access = TOKENS.get("access_token")
+    if not access and not in_test_mode():
+        raise HTTPException(status_code=401, detail="Not authorized - no access token")
+    
+    # Fetch full quote details from Jobber API
+    client = JobberClient(access or "mock_access_token")
+    quote = await client.get_quote(item_id)
+    
+    if not quote:
+        raise HTTPException(status_code=404, detail=f"Quote {item_id} not found in Jobber")
+    
+    # ----------------------
+    # Step 5: Extract booking data from quote
+    # ----------------------
+    quote_id = quote.get("id", item_id)
+    quote_status = quote.get("quoteStatus", "").lower()
+    cost = quote.get("amounts", {}).get("totalPrice", 0)
+    
+    client_data = quote.get("client", {})
+    client_id = client_data.get("id", "C123")
+    client_name = f"{client_data.get('firstName', '')} {client_data.get('lastName', '')}".strip()
+    company_name = client_data.get("companyName", "")
+    
+    # Get address from property or billing address
+    property_data = quote.get("property", {})
+    property_id = property_data.get("id")
+    address_data = property_data.get("address", {}) or client_data.get("billingAddress", {})
+    
+    address = ", ".join(filter(None, [
+        address_data.get("street"),
+        address_data.get("city"),
+        address_data.get("province"),
+        address_data.get("postalCode")
+    ]))
+    city = address_data.get("city", "Saskatoon")
+    
+    # Only process approved quotes
+    if quote_status != "approved":
+        return JSONResponse({
+            "status": "ignored",
+            "reason": f"Quote status is {quote_status}, not approved",
+            "quote_id": quote_id
+        })
+    
+    # ----------------------
+    # Step 6: Classify job and book
+    # ----------------------
+    job_tag = classify_job_tag(
+        address=address,
+        client_name=client_name or company_name,
+        quote_amount=cost
+    )
+    
+    estimated_duration = estimate_time(cost) if cost > 0 else timedelta(hours=2)
+    if estimated_duration == -1:
+        raise HTTPException(status_code=400, detail="Invalid quote cost")
+    
+    # Book the job
+    async with BOOK_LOCK:
+        start_datetime = ceil_to_30(datetime.now())
+        
+        if start_datetime.hour < 8:
+            start_datetime = start_datetime.replace(hour=8, minute=0, second=0, microsecond=0)
+        elif start_datetime.hour >= 20:
+            start_datetime = (start_datetime + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+        
+        while not is_workday(start_datetime):
+            start_datetime = (start_datetime + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+        
+        visits = get_visits()
+        slot = auto_book(visits, start_datetime, estimated_duration, city, client_id, allow_tentative=True)
+        
+        if not slot:
+            raise HTTPException(status_code=400, detail="No available slot found")
+        
+        start_slot = slot["startAt"]
+        end_slot = slot["endAt"]
+        booking_status = slot.get("booking_status", "confirmed")
+        weather_confidence = slot.get("weather_confidence", "unknown")
+        
+        add_visit(start_slot, end_slot, client_id, job_tag, booking_status)
+    
+    # ----------------------
+    # Step 7: Create job in Jobber
+    # ----------------------
+    job_title = quote.get("title") or f"Quote {quote_id}"
+    job = await client.create_job(job_title, client_id, property_id)
+    job_id = job.get("id", f"J_{quote_id}")
+    
+    # Create visit in Jobber
+    try:
+        visit = await client.create_visit(
+            job_id=job_id,
+            start_at=start_slot,
+            end_at=end_slot,
+            title=job_title
+        )
+    except Exception as e:
+        # Log error but don't fail - local booking is done
+        print(f"Warning: Could not create visit in Jobber: {e}")
+    
+    # Mark quote as processed
+    try:
+        mark_quote_processed(quote_id, client_id, job_id, start_slot, end_slot)
+    except sqlite3.IntegrityError:
+        existing = get_processed_quote(quote_id)
+        return JSONResponse({
+            "status": f"Quote {quote_id} already scheduled",
+            "scheduled_start": existing["start_at"],
+            "scheduled_end": existing["end_at"],
+            "job_id": existing["job_id"],
+            "client_id": existing["client_id"],
+            "idempotent": True
+        })
+    
+    # Notify team and client
+    await notify_team(job_id, f"Job scheduled: {job_title} for {client_name} at {start_slot}",
+                      access_token=access or "mock_access_token")
+    await notify_client(job_id, f"Your job is booked for {start_slot} to {end_slot}",
+                        access_token=access or "mock_access_token")
+    
+    return JSONResponse({
+        "status": f"Quote {quote_id} approved and scheduled",
+        "scheduled_start": start_slot,
+        "scheduled_end": end_slot,
+        "job_id": job_id,
+        "client_id": client_id,
+        "client_name": client_name,
+        "job_tag": job_tag,
+        "booking_status": booking_status,
+        "weather_confidence": weather_confidence,
+        "city": city
     })
 
 

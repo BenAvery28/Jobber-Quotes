@@ -12,8 +12,11 @@ print(str(load_dotenv()) + " environment var has been loaded (for testing)") # l
 # loading jobber stuff
 JOBBER_CLIENT_ID = os.getenv("JOBBER_CLIENT_ID")
 JOBBER_CLIENT_SECRET = os.getenv("JOBBER_CLIENT_SECRET")
-JOBBER_API_BASE = os.getenv("JOBBER_API_BASE")
 JOBBER_API_KEY = os.getenv("JOBBER_API_KEY")
+
+# Jobber API endpoint (fixed per their docs)
+JOBBER_API_BASE = "https://api.getjobber.com/api"
+JOBBER_GRAPHQL_URL = f"{JOBBER_API_BASE}/graphql"
 
 # checks
 if not JOBBER_CLIENT_ID:
