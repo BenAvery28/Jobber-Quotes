@@ -4,6 +4,7 @@
 # Supports manual time/day selection
 
 from datetime import datetime, timedelta
+from src.timezone_utils import now as tz_now
 from src.db import create_recurring_job, get_recurring_jobs, add_visit, get_visits
 from src.api.scheduler import is_workday, check_availability, WORK_START, WORK_END
 from src.api.weather import check_weather_with_confidence
@@ -175,7 +176,7 @@ def book_entire_summer(client_id: str, day_of_week: int, start_time: str, durati
     """
     # Default dates if not provided
     if not start_date:
-        now = datetime.now()
+        now = tz_now()
         # Find first Monday of current month
         first_day = now.replace(day=1)
         days_until_monday = (0 - first_day.weekday()) % 7
@@ -185,7 +186,7 @@ def book_entire_summer(client_id: str, day_of_week: int, start_time: str, durati
     
     if not end_date:
         # Default to end of August (summer season)
-        now = datetime.now()
+        now = tz_now()
         end_date = now.replace(month=8, day=31).strftime("%Y-%m-%d")
     
     # Create recurring job

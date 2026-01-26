@@ -4,7 +4,11 @@
 
 import requests
 from datetime import datetime, timedelta
-from config.settings import OPENWEATHER_API_KEY
+from config.settings import OPENWEATHER_API_KEY, WEATHER_FAILURE_MODE
+from src.api.retry import retry_sync
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def get_hourly_forecast(city, days_ahead=2):
@@ -26,13 +30,19 @@ def get_hourly_forecast(city, days_ahead=2):
     geo_url = "http://api.openweathermap.org/geo/1.0/direct"
     geo_params = {"q": query, "limit": 1, "appid": OPENWEATHER_API_KEY}
 
+    @retry_sync(max_retries=3, initial_delay=0.5, exceptions=(requests.RequestException,))
+    def _get_geocode():
+        resp = requests.get(geo_url, params=geo_params, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+    
     try:
-        geo_resp = requests.get(geo_url, params=geo_params, timeout=5).json()
+        geo_resp = _get_geocode()
         if not geo_resp:
             return None
         lat, lon = geo_resp[0]["lat"], geo_resp[0]["lon"]
     except Exception as e:
-        print(f"Geocoding error: {e}")
+        logger.error(f"Geocoding error for {city}: {e}", exc_info=True)
         return None
 
     # Use free 5-day/3-hour forecast API
@@ -44,11 +54,17 @@ def get_hourly_forecast(city, days_ahead=2):
         "units": "metric"
     }
 
+    @retry_sync(max_retries=3, initial_delay=0.5, exceptions=(requests.RequestException,))
+    def _get_forecast():
+        resp = requests.get(forecast_url, params=params, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    
     try:
-        forecast = requests.get(forecast_url, params=params, timeout=10).json()
+        forecast = _get_forecast()
         return forecast
     except Exception as e:
-        print(f"Forecast API error: {e}")
+        logger.error(f"Forecast API error for {city}: {e}", exc_info=True)
         return None
 
 
@@ -65,8 +81,14 @@ def check_weather(city, date, start_hour=8, end_hour=20):
     """
     forecast = get_hourly_forecast(city, days_ahead=2)
     if not forecast or 'list' not in forecast:
-        # If weather API fails, be conservative and allow booking
-        return True
+        # Weather API failure behavior is configurable
+        if WEATHER_FAILURE_MODE == "fail_safe":
+            logger.warning(f"Weather API failed for {city} on {date}, failing safe (rejecting booking)")
+            return False
+        else:
+            # Default: fail_open - allow booking when API fails
+            logger.warning(f"Weather API failed for {city} on {date}, failing open (allowing booking)")
+            return True
 
     target_date = date.date()
 
@@ -116,15 +138,25 @@ def check_weather_with_confidence(city, date, start_hour=8, end_hour=20):
     """
     forecast = get_hourly_forecast(city, days_ahead=2)
     
-    # If forecast unavailable, return uncertain (allow booking but mark as tentative)
+    # If forecast unavailable, behavior depends on failure mode
     if not forecast or 'list' not in forecast:
-        return {
-            'suitable': True,
-            'confidence': 'low',
-            'reason': 'Forecast unavailable - booking tentatively',
-            'max_pop': None,
-            'severe_weather': False
-        }
+        if WEATHER_FAILURE_MODE == "fail_safe":
+            return {
+                'suitable': False,
+                'confidence': 'bad',
+                'reason': 'Forecast unavailable - failing safe (rejecting booking)',
+                'max_pop': None,
+                'severe_weather': False
+            }
+        else:
+            # Default: fail_open - allow booking but mark as tentative
+            return {
+                'suitable': True,
+                'confidence': 'low',
+                'reason': 'Forecast unavailable - booking tentatively',
+                'max_pop': None,
+                'severe_weather': False
+            }
     
     target_date = date.date()
     max_pop = 0.0

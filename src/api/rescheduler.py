@@ -12,7 +12,11 @@ from src.api.scheduler import is_workday, WORK_START, WORK_END, auto_book, estim
 from src.api.jobber_client import create_job, notify_team, notify_client
 from src.api.job_classifier import get_crew_for_tag
 from src.api.route_optimizer import optimize_visit_order
+from src.timezone_utils import now as tz_now
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def cancel_appointment(client_id, reason="Customer cancellation"):
@@ -71,7 +75,7 @@ def check_weather_impact_on_schedule(visits=None, city="Saskatoon"):
         start_time = datetime.fromisoformat(visit['startAt'])
 
         # Only check jobs in the future
-        if start_time <= datetime.now():
+        if start_time <= tz_now():
             continue
 
         # Check if weather is suitable for this job
@@ -208,7 +212,7 @@ async def notify_rescheduled_jobs(rescheduled_jobs, access_token="mock_access_to
             )
 
         except Exception as e:
-            print(f"Failed to notify for rescheduled job {client_id}: {e}")
+            logger.error(f"Failed to notify for rescheduled job {client_id}: {e}", exc_info=True)
 
 
 def run_daily_weather_check(city="Saskatoon"):
@@ -220,13 +224,13 @@ def run_daily_weather_check(city="Saskatoon"):
     Returns:
         dict: Summary of any rescheduling actions taken
     """
-    print(f"Running daily weather check for {city}...")
+    logger.info(f"Running daily weather check for {city}...")
 
     # Get all future appointments
     all_visits = get_visits()
     future_visits = [
         visit for visit in all_visits
-        if datetime.fromisoformat(visit['startAt']) > datetime.now()
+        if datetime.fromisoformat(visit['startAt']) > tz_now()
     ]
 
     # Check for weather impact
@@ -242,7 +246,7 @@ def run_daily_weather_check(city="Saskatoon"):
     # Reschedule affected jobs
     reschedule_result = reschedule_weather_affected_jobs(affected_jobs, city)
 
-    print(f"Weather check complete. Rescheduled {reschedule_result['successfully_rescheduled']} jobs.")
+    logger.info(f"Weather check complete. Rescheduled {reschedule_result['successfully_rescheduled']} jobs.")
 
     return reschedule_result
 
@@ -286,7 +290,7 @@ def recheck_tentative_bookings(city="Saskatoon"):
         duration = end_time - start_time
         
         # Only check bookings that are still in the future
-        if start_time <= datetime.now():
+        if start_time <= tz_now():
             continue
         
         # Recheck weather with confidence
@@ -309,7 +313,7 @@ def recheck_tentative_bookings(city="Saskatoon"):
             # Try to find a better slot
             new_slot = auto_book(
                 all_visits,
-                datetime.now(),
+                tz_now(),
                 duration,
                 city,
                 client_id,
@@ -379,7 +383,7 @@ def compact_schedule():
         duration = end_time - start_time
 
         # Try to find an earlier slot
-        search_start = datetime.now().replace(hour=WORK_START, minute=0, second=0, microsecond=0)
+        search_start = tz_now().replace(hour=WORK_START, minute=0, second=0, microsecond=0)
         while search_start < start_time:
             if is_workday(search_start):
                 # Check if this earlier slot is available

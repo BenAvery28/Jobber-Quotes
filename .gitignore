@@ -12,6 +12,11 @@ env/
 # Environment variables / secrets
 .env
 
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
 # IDE / editor files
 .vscode/
 .idea/

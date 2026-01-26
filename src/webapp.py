@@ -1,10 +1,14 @@
 import os  # Added for TEST_MODE
 import asyncio
 import sqlite3
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, RedirectResponse
 import httpx
 from datetime import datetime, timedelta
+import logging
+from src.timezone_utils import now as tz_now
+
+logger = logging.getLogger(__name__)
 from src.api.scheduler import auto_book, is_workday, estimate_time
 from src.api.jobber_client import create_job, notify_team, notify_client, JobberClient
 from src.api.rescheduler import cancel_appointment, run_daily_weather_check, compact_schedule, \
@@ -18,7 +22,11 @@ from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_K
 import secrets
 from fastapi.responses import HTMLResponse
 from testing.mock_data import generate_mock_webhook
-from src.db import init_db, get_visits, add_visit, get_processed_quote, mark_quote_processed
+from src.db import init_db, get_visits, add_visit, get_processed_quote, mark_quote_processed, save_token, get_token
+from src.logging_config import setup_logging
+
+# Initialize logging
+setup_logging()
 
 
 
@@ -40,7 +48,7 @@ BOOK_LOCK = asyncio.Lock()  # Lock to prevent double-booking races
 
 JOBBER_CLIENT_ID = os.getenv("JOBBER_CLIENT_ID")
 JOBBER_CLIENT_SECRET = os.getenv("JOBBER_CLIENT_SECRET")
-REDIRECT_URI = "https://e7f222e9c2c7.ngrok-free.app/oauth/callback"  # your ngrok URL
+REDIRECT_URI = os.getenv("JOBBER_REDIRECT_URI", "http://localhost:8000/oauth/callback")
 GQL_URL = "https://api.getjobber.com/api/graphql"
 
 if not JOBBER_CLIENT_ID:
@@ -49,7 +57,20 @@ if not JOBBER_CLIENT_SECRET:
     raise RuntimeError("JOBBER_CLIENT_SECRET is required!")
 
 STATE = {"value": None}
-TOKENS = {}
+
+# Helper functions for token management
+def get_access_token():
+    """Get access token from database, with fallback for test mode."""
+    if in_test_mode():
+        return "mock_access_token"
+    token_data = get_token("access_token")
+    if token_data and token_data.get("token"):
+        return token_data["token"]
+    return None
+
+def set_access_token(token: str, expires_at: str = None):
+    """Save access token to database."""
+    save_token("access_token", token, expires_at)
 
 
 # -------------------
@@ -83,7 +104,7 @@ def ceil_to_30(dt: datetime) -> datetime:
 async def start_auth():
     """Start OAuth flow by redirecting to Jobber login page"""
     if in_test_mode():
-        TOKENS["access_token"] = "mock_access_token"
+        set_access_token("mock_access_token")
         return JSONResponse({"status": "Mock auth successful"})
     STATE["value"] = secrets.token_urlsafe(24)
     url = httpx.URL(
@@ -207,7 +228,7 @@ async def book_job_endpoint(request: Request):
     # ----------------------
     # Step 2: Authentication check
     # ----------------------
-    access = TOKENS.get("access_token")
+    access = get_access_token()
     if not access and not in_test_mode():
         raise HTTPException(status_code=401, detail="Not authorized")
 
@@ -228,7 +249,7 @@ async def book_job_endpoint(request: Request):
     # Use lock to prevent double-booking races
     async with BOOK_LOCK:
         # Start from now, rounded up to next 30-minute boundary
-        start_datetime = ceil_to_30(datetime.now())
+        start_datetime = ceil_to_30(tz_now())
         
         # If rounded time is before 8am, set to 8am
         if start_datetime.hour < 8:
@@ -293,10 +314,111 @@ async def book_job_endpoint(request: Request):
 
 
 # -------------------
+# BACKGROUND TASK FOR WEBHOOK PROCESSING
+# -------------------
+async def process_webhook_background(
+    item_id: str,
+    quote_id: str,
+    client_id: str,
+    client_name: str,
+    company_name: str,
+    address: str,
+    city: str,
+    cost: float,
+    property_id: str,
+    job_tag: str,
+    crew_assignment: str,
+    estimated_duration: timedelta,
+    access_token: str
+):
+    """
+    Background task to process webhook after returning 202 to Jobber.
+    This prevents webhook timeouts and allows proper retry handling.
+    """
+    try:
+        logger.info(f"Processing webhook in background for quote {quote_id}")
+        
+        # Re-check idempotency (race condition protection)
+        existing = get_processed_quote(quote_id)
+        if existing:
+            logger.info(f"Quote {quote_id} already processed (idempotent check)")
+            return
+        
+        # Book the job
+        async with BOOK_LOCK:
+            start_datetime = ceil_to_30(tz_now())
+            
+            if start_datetime.hour < 8:
+                start_datetime = start_datetime.replace(hour=8, minute=0, second=0, microsecond=0)
+            elif start_datetime.hour >= 20:
+                start_datetime = (start_datetime + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+            
+            while not is_workday(start_datetime):
+                start_datetime = (start_datetime + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+            
+            visits = get_visits()
+            slot = auto_book(visits, start_datetime, estimated_duration, city, client_id, allow_tentative=True)
+            
+            if not slot:
+                logger.error(f"No available slot found for quote {quote_id}")
+                return
+            
+            start_slot = slot["startAt"]
+            end_slot = slot["endAt"]
+            booking_status = slot.get("booking_status", "confirmed")
+            weather_confidence = slot.get("weather_confidence", "unknown")
+            
+            add_visit(start_slot, end_slot, client_id, job_tag, booking_status)
+        
+        # Create job in Jobber
+        client = JobberClient(access_token or "mock_access_token")
+        job_title = f"Quote {quote_id}"
+        job = await client.create_job(job_title, client_id, property_id)
+        job_id = job.get("id", f"J_{quote_id}")
+        
+        # Create visit in Jobber - must succeed before marking as processed
+        try:
+            visit = await client.create_visit(
+                job_id=job_id,
+                start_at=start_slot,
+                end_at=end_slot,
+                title=job_title
+            )
+            visit_id = visit.get("id") if visit else None
+        except Exception as e:
+            # Visit creation failed - rollback local booking
+            from src.db import remove_visit_by_name
+            remove_visit_by_name(client_id)
+            logger.error(f"Could not create visit in Jobber: {e}. Local booking rolled back.", exc_info=True)
+            raise
+        
+        # Mark as processed (with idempotency check)
+        try:
+            mark_quote_processed(quote_id, client_id, job_id, start_slot, end_slot)
+        except sqlite3.IntegrityError:
+            # Another worker processed it first
+            logger.info(f"Quote {quote_id} already processed by another worker")
+            return
+        
+        # Notify team and client
+        await notify_team(job_id, f"Job scheduled: {job_title} for {client_name or company_name} at {start_slot} (crew: {crew_assignment})",
+                          access_token=access_token or "mock_access_token")
+        await notify_client(job_id, f"Your job is booked for {start_slot} to {end_slot}",
+                            access_token=access_token or "mock_access_token")
+        
+        logger.info(f"Successfully processed webhook for quote {quote_id}, job {job_id}")
+        
+    except Exception as e:
+        logger.error(f"Error processing webhook for quote {quote_id}: {e}", exc_info=True)
+        # Don't re-raise - we've already returned 202 to Jobber
+        # The error is logged for monitoring/alerting
+
+
+# -------------------
 # JOBBER WEBHOOK ENDPOINT (Production)
 # -------------------
 @app.post("/webhook/jobber")
-async def jobber_webhook_endpoint(request: Request):
+async def jobber_webhook_endpoint(request: Request, background_tasks: BackgroundTasks):
     """
     Production webhook endpoint for Jobber events.
     
@@ -372,7 +494,7 @@ async def jobber_webhook_endpoint(request: Request):
     # ----------------------
     # Step 4: Get access token and fetch quote details
     # ----------------------
-    access = TOKENS.get("access_token")
+    access = get_access_token()
     if not access and not in_test_mode():
         raise HTTPException(status_code=401, detail="Not authorized - no access token")
     
@@ -449,7 +571,7 @@ async def jobber_webhook_endpoint(request: Request):
     
     # Book the job
     async with BOOK_LOCK:
-        start_datetime = ceil_to_30(datetime.now())
+        start_datetime = ceil_to_30(tz_now())
         
         if start_datetime.hour < 8:
             start_datetime = start_datetime.replace(hour=8, minute=0, second=0, microsecond=0)
@@ -496,7 +618,7 @@ async def jobber_webhook_endpoint(request: Request):
         # Visit creation failed - rollback local booking to allow retry
         from src.db import remove_visit_by_name
         remove_visit_by_name(client_id)
-        print(f"Error: Could not create visit in Jobber: {e}. Local booking rolled back.")
+        logger.error(f"Could not create visit in Jobber: {e}. Local booking rolled back.", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create visit in Jobber. Booking rolled back. Error: {e}"
@@ -559,7 +681,7 @@ async def cancel_appointment_endpoint(request: Request):
 
         # Notify about rescheduled jobs if any
         if result.get("rescheduled_jobs"):
-            access_token = TOKENS.get("access_token", "mock_access_token")
+            access_token = get_access_token() or "mock_access_token"
             from src.api.rescheduler import notify_rescheduled_jobs
             await notify_rescheduled_jobs(result["rescheduled_jobs"], access_token)
 
@@ -579,7 +701,7 @@ async def run_weather_check():
 
         # Notify about rescheduled jobs if any
         if result.get("rescheduled_jobs"):
-            access_token = TOKENS.get("access_token", "mock_access_token")
+            access_token = get_access_token() or "mock_access_token"
             from src.api.rescheduler import notify_rescheduled_jobs
             await notify_rescheduled_jobs(result["rescheduled_jobs"], access_token)
 
@@ -651,7 +773,7 @@ async def get_schedule_status():
         weather_affected = check_weather_impact_on_schedule(visits, "Saskatoon")
 
         # Separate future and past visits
-        now = datetime.now()
+        now = tz_now()
         future_visits = [v for v in visits if datetime.fromisoformat(v['startAt']) > now]
         past_visits = [v for v in visits if datetime.fromisoformat(v['startAt']) <= now]
 

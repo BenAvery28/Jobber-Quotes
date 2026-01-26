@@ -8,6 +8,10 @@ import asyncio
 import httpx
 from datetime import datetime
 from config.settings import JOBBER_GRAPHQL_URL, JOBBER_CLIENT_SECRET
+from src.api.retry import retry_with_backoff
+import logging
+
+logger = logging.getLogger(__name__)
 
 TEST_MODE = os.getenv("TEST_MODE", "False").lower() == "true"
 
@@ -26,7 +30,7 @@ class JobberClient:
         }
     
     async def _execute_query(self, query: str, variables: dict = None) -> dict:
-        """Execute a GraphQL query/mutation against Jobber API."""
+        """Execute a GraphQL query/mutation against Jobber API with retry logic."""
         if TEST_MODE:
             return self._mock_response(query, variables)
         
@@ -34,15 +38,28 @@ class JobberClient:
         if variables:
             payload["variables"] = variables
         
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                JOBBER_GRAPHQL_URL,
-                json=payload,
-                headers=self.headers,
-                timeout=30.0
+        async def _make_request():
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    JOBBER_GRAPHQL_URL,
+                    json=payload,
+                    headers=self.headers,
+                    timeout=30.0
+                )
+                response.raise_for_status()
+                return response.json()
+        
+        # Retry with exponential backoff for network errors and 5xx errors
+        return await retry_with_backoff(
+            _make_request,
+            max_retries=3,
+            initial_delay=1.0,
+            max_delay=30.0,
+            exceptions=(httpx.HTTPError, httpx.HTTPStatusError),
+            on_retry=lambda attempt, error, delay: logger.warning(
+                f"Jobber API request failed (attempt {attempt}), retrying in {delay}s: {error}"
             )
-            response.raise_for_status()
-            return response.json()
+        )
     
     def _mock_response(self, query: str, variables: dict = None) -> dict:
         """Return mock responses for testing."""

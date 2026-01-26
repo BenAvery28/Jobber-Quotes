@@ -5,8 +5,8 @@
 import os
 from dotenv import load_dotenv
 
-#added print for testing purposes
-print(str(load_dotenv()) + " environment var has been loaded (for testing)") # loads .env into environment
+# Load environment variables
+load_dotenv()  # loads .env into environment
 
 
 # loading jobber stuff
@@ -33,6 +33,11 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 # options: "none", "jobber", "external"
 ROUTE_OPTIMIZATION_MODE = os.getenv("ROUTE_OPTIMIZATION_MODE", "none").lower()
 EXTERNAL_ROUTE_API_KEY = os.getenv("EXTERNAL_ROUTE_API_KEY")
+
+# Weather API failure mode
+# "fail_safe" = reject booking when weather API fails (safer, may block bookings)
+# "fail_open" = allow booking when weather API fails (default, more permissive)
+WEATHER_FAILURE_MODE = os.getenv("WEATHER_FAILURE_MODE", "fail_open").lower()
 
 
 
