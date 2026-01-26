@@ -10,6 +10,8 @@ from src.db import get_visits, remove_visit_by_name, add_visit, clear_visits, ge
 from src.api.weather import check_weather, get_next_suitable_weather_slot, check_weather_with_confidence
 from src.api.scheduler import is_workday, WORK_START, WORK_END, auto_book, estimate_time
 from src.api.jobber_client import create_job, notify_team, notify_client
+from src.api.job_classifier import get_crew_for_tag
+from src.api.route_optimizer import optimize_visit_order
 import asyncio
 
 
@@ -78,7 +80,8 @@ def check_weather_impact_on_schedule(visits=None, city="Saskatoon"):
                 "client_id": visit['client_id'],
                 "original_start": visit['startAt'],
                 "original_end": visit['endAt'],
-                "date": visit['date']
+                "date": visit['date'],
+                "job_tag": visit.get("job_tag", "residential")
             })
 
     return affected_jobs
@@ -121,7 +124,8 @@ def reschedule_weather_affected_jobs(affected_jobs, city="Saskatoon"):
                 add_visit(
                     new_slot["start"].isoformat(),
                     new_slot["end"].isoformat(),
-                    job["client_id"]
+                    job["client_id"],
+                    job.get("job_tag", "residential")
                 )
 
                 result["successfully_rescheduled"] += 1
@@ -130,7 +134,8 @@ def reschedule_weather_affected_jobs(affected_jobs, city="Saskatoon"):
                     "old_start": job["original_start"],
                     "new_start": new_slot["start"].isoformat(),
                     "new_end": new_slot["end"].isoformat(),
-                    "weather_reason": f"POP: {new_slot.get('pop', 0):.1%}, {new_slot.get('weather', 'Unknown')}"
+                    "weather_reason": f"POP: {new_slot.get('pop', 0):.1%}, {new_slot.get('weather', 'Unknown')}",
+                    "job_tag": job.get("job_tag", "residential")
                 })
             else:
                 result["failed_to_reschedule"] += 1
@@ -174,6 +179,8 @@ async def notify_rescheduled_jobs(rescheduled_jobs, access_token="mock_access_to
         new_start = job["new_start"]
         new_end = job["new_end"]
         reason = job.get("weather_reason", "Weather conditions")
+        job_tag = job.get("job_tag", "residential")
+        crew_assignment = get_crew_for_tag(job_tag)
 
         try:
             # Create new job in Jobber
@@ -189,7 +196,7 @@ async def notify_rescheduled_jobs(rescheduled_jobs, access_token="mock_access_to
             # Notify team
             await notify_team(
                 job_id,
-                f"Job rescheduled for {client_id} due to weather. New time: {new_start}",
+                f"Job rescheduled for {client_id} due to weather. New time: {new_start} (crew: {crew_assignment})",
                 access_token
             )
 
@@ -402,7 +409,10 @@ def compact_schedule():
 
             search_start += timedelta(minutes=30)
 
+    route_optimization = optimize_visit_order(get_visits())
+
     return {
         "total_optimized": len(optimized_jobs),
-        "optimized_jobs": optimized_jobs
+        "optimized_jobs": optimized_jobs,
+        "route_optimization": route_optimization
     }

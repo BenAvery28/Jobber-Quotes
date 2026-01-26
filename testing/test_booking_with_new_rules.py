@@ -8,6 +8,7 @@ Integration tests to verify booking respects new scheduling rules:
 
 import os
 import pytest
+from unittest.mock import patch
 from datetime import datetime, timedelta
 
 # Set required environment variables before importing
@@ -149,4 +150,86 @@ def test_booking_sequence_respects_all_rules(clean_db):
     for slot in booked_slots:
         start_time = datetime.fromisoformat(slot["startAt"])
         assert start_time.weekday() != 4, "No slot should be on Friday"
+
+
+def test_booking_confidence_high_is_confirmed(clean_db):
+    """High weather confidence should return confirmed booking."""
+    start_date = datetime(2025, 1, 13, 8, 0, 0)  # Monday
+    duration = timedelta(hours=2)
+    visits = []
+
+    with patch("src.api.scheduler.check_weather_with_confidence") as mock_weather:
+        mock_weather.return_value = {
+            "suitable": True,
+            "confidence": "high",
+            "reason": "clear",
+            "max_pop": 0.1,
+            "severe_weather": False,
+        }
+        slot = auto_book(visits, start_date, duration, "Saskatoon", "C_TEST")
+
+    assert slot is not None, "Should find a slot"
+    assert slot["booking_status"] == "confirmed"
+    assert slot["weather_confidence"] == "high"
+
+
+def test_booking_confidence_medium_is_confirmed(clean_db):
+    """Medium weather confidence should return confirmed booking."""
+    start_date = datetime(2025, 1, 13, 8, 0, 0)  # Monday
+    duration = timedelta(hours=2)
+    visits = []
+
+    with patch("src.api.scheduler.check_weather_with_confidence") as mock_weather:
+        mock_weather.return_value = {
+            "suitable": True,
+            "confidence": "medium",
+            "reason": "moderate",
+            "max_pop": 0.3,
+            "severe_weather": False,
+        }
+        slot = auto_book(visits, start_date, duration, "Saskatoon", "C_TEST")
+
+    assert slot is not None, "Should find a slot"
+    assert slot["booking_status"] == "confirmed"
+    assert slot["weather_confidence"] == "medium"
+
+
+def test_booking_confidence_low_is_tentative(clean_db):
+    """Low weather confidence should return tentative booking when allowed."""
+    start_date = datetime(2025, 1, 13, 8, 0, 0)  # Monday
+    duration = timedelta(hours=12)
+    visits = []
+
+    with patch("src.api.scheduler.check_weather_with_confidence") as mock_weather:
+        mock_weather.return_value = {
+            "suitable": True,
+            "confidence": "low",
+            "reason": "uncertain",
+            "max_pop": 0.45,
+            "severe_weather": False,
+        }
+        slot = auto_book(visits, start_date, duration, "Saskatoon", "C_TEST", allow_tentative=True)
+
+    assert slot is not None, "Should return a tentative slot"
+    assert slot["booking_status"] == "tentative"
+    assert slot["weather_confidence"] == "low"
+
+
+def test_booking_confidence_low_blocked_without_tentative(clean_db):
+    """Low confidence should return None when tentative bookings are disallowed."""
+    start_date = datetime(2025, 1, 13, 8, 0, 0)  # Monday
+    duration = timedelta(hours=12)
+    visits = []
+
+    with patch("src.api.scheduler.check_weather_with_confidence") as mock_weather:
+        mock_weather.return_value = {
+            "suitable": True,
+            "confidence": "low",
+            "reason": "uncertain",
+            "max_pop": 0.45,
+            "severe_weather": False,
+        }
+        slot = auto_book(visits, start_date, duration, "Saskatoon", "C_TEST", allow_tentative=False)
+
+    assert slot is None, "Should not book when low confidence and tentative disabled"
 

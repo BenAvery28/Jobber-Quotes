@@ -29,5 +29,10 @@ if not JOBBER_CLIENT_SECRET:
 # loading weather api key
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
+# routing / optimization
+# options: "none", "jobber", "external"
+ROUTE_OPTIMIZATION_MODE = os.getenv("ROUTE_OPTIMIZATION_MODE", "none").lower()
+EXTERNAL_ROUTE_API_KEY = os.getenv("EXTERNAL_ROUTE_API_KEY")
+
 
 

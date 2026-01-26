@@ -163,3 +163,18 @@ def test_booking_weekend_moves_to_monday():
                 assert scheduled_start >= expected_min_start, \
                     f"Scheduled start {scheduled_start} should be >= {expected_min_start} (next Monday)"
 
+
+def test_booking_response_includes_crew_assignment():
+    """
+    Test that booking response includes crew assignment based on job tag.
+    The mock payload defaults to residential tagging.
+    """
+    payload = generate_mock_webhook(quote_id="Q_CREW_TEST")["data"]
+    response = client.post("/book-job", json=payload)
+
+    if response.status_code == 200:
+        data = response.json()
+        assert data.get("job_tag") == "residential", "Mock payload should default to residential"
+        assert data.get("crew_assignment") == "residential_crew", \
+            "Crew assignment should match residential tag"
+

@@ -70,6 +70,8 @@ class JobberClient:
                     },
                     "client": {
                         "id": "C123",
+                        "name": "John Doe",
+                        "isCompany": False,
                         "firstName": "John",
                         "lastName": "Doe",
                         "companyName": None,
@@ -78,6 +80,19 @@ class JobberClient:
                             "street": "123 Main St",
                             "postalCode": "S7K 1A1",
                             "province": "SK",
+                        },
+                        "clientProperties": {
+                            "nodes": [
+                                {
+                                    "id": "P123",
+                                    "address": {
+                                        "city": "Saskatoon",
+                                        "street": "123 Main St",
+                                        "postalCode": "S7K 1A1",
+                                        "province": "SK",
+                                    },
+                                }
+                            ]
                         },
                         "phones": [
                             {"number": "306-555-1234", "primary": True}
@@ -163,6 +178,8 @@ class JobberClient:
                 }
                 client {
                     id
+                    name
+                    isCompany
                     firstName
                     lastName
                     companyName
@@ -171,6 +188,17 @@ class JobberClient:
                         street
                         postalCode
                         province
+                    }
+                    clientProperties {
+                        nodes {
+                            id
+                            address {
+                                city
+                                street
+                                postalCode
+                                province
+                            }
+                        }
                     }
                     phones {
                         number
@@ -202,6 +230,8 @@ class JobberClient:
         query GetClient($id: EncodedId!) {
             client(id: $id) {
                 id
+                name
+                isCompany
                 firstName
                 lastName
                 companyName
@@ -211,7 +241,7 @@ class JobberClient:
                     postalCode
                     province
                 }
-                properties {
+                clientProperties {
                     nodes {
                         id
                         address {

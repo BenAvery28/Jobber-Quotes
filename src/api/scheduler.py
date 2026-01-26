@@ -2,7 +2,7 @@
 #
 # Full scheduling system:
 # - Checks availability
-# - Finds next open slot (Mon–Fri, 9–5)
+# - Finds next open slot (Mon–Thu, 8–8)
 # - Respects holidays and grace periods
 # - Books jobs and updates visit list
 # - Prepares data to send to Jobber

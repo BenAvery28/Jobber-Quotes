@@ -9,7 +9,7 @@ from src.api.scheduler import auto_book, is_workday, estimate_time
 from src.api.jobber_client import create_job, notify_team, notify_client, JobberClient
 from src.api.rescheduler import cancel_appointment, run_daily_weather_check, compact_schedule, \
     check_weather_impact_on_schedule, recheck_tentative_bookings
-from src.api.job_classifier import classify_job_tag
+from src.api.job_classifier import classify_job_tag, get_crew_for_tag
 from src.api.recurring_jobs import create_recurring_job, generate_bookings_from_recurring_job, \
     book_entire_summer
 from src.api.webhook_verify import verify_jobber_webhook, parse_webhook_payload, QUOTE_TOPICS
@@ -155,6 +155,7 @@ async def book_job_endpoint(request: Request):
         
         # Classify job tag (commercial vs residential)
         job_tag = classify_job_tag(address=address, client_name=client_name, quote_amount=cost)
+        crew_assignment = get_crew_for_tag(job_tag)
 
         existing = get_processed_quote(quote_id)
         if existing:
@@ -195,6 +196,7 @@ async def book_job_endpoint(request: Request):
                         address = ", ".join(address_parts)
                     # Classify job tag
                     job_tag = classify_job_tag(address=address, client_name=client_name, quote_amount=cost)
+                    crew_assignment = get_crew_for_tag(job_tag)
                 else:
                     raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {e}")
             except:
@@ -249,7 +251,7 @@ async def book_job_endpoint(request: Request):
         booking_status = slot.get("booking_status", "confirmed")
         weather_confidence = slot.get("weather_confidence", "unknown")
 
-        # Pass client_id, job_tag, and booking_status to add_visit
+    # Pass client_id, job_tag, and booking_status to add_visit
         add_visit(start_slot, end_slot, client_id, job_tag, booking_status)
 
     job_response = await create_job(f"Quote {quote_id}", start_slot, end_slot,
@@ -270,7 +272,7 @@ async def book_job_endpoint(request: Request):
             "idempotent": True
         })
 
-    await notify_team(job_id, f"Job scheduled: Quote {quote_id} for client {client_id} at {start_slot}",
+    await notify_team(job_id, f"Job scheduled: Quote {quote_id} for client {client_id} at {start_slot} (crew: {crew_assignment})",
                       access_token=access or "mock_access_token")
     await notify_client(job_id, f"Your job is booked for {start_slot} to {end_slot}",
                         access_token=access or "mock_access_token")
@@ -284,6 +286,7 @@ async def book_job_endpoint(request: Request):
         "job_id": job_id,
         "client_id": client_id,
         "job_tag": job_tag,
+        "crew_assignment": crew_assignment,
         "booking_status": booking_status,
         "weather_confidence": weather_confidence
     })
@@ -384,11 +387,15 @@ async def jobber_webhook_endpoint(request: Request):
     
     client_data = quote.get("client", {})
     client_id = client_data.get("id", "C123")
-    client_name = f"{client_data.get('firstName', '')} {client_data.get('lastName', '')}".strip()
+    client_name = client_data.get("name") or f"{client_data.get('firstName', '')} {client_data.get('lastName', '')}".strip()
     company_name = client_data.get("companyName", "")
     
-    # Get address from property or billing address
-    property_data = quote.get("property", {})
+    # Get address from quote property, client property, or billing address
+    property_data = quote.get("property", {}) or {}
+    if not property_data:
+        client_properties = client_data.get("clientProperties", {}).get("nodes", [])
+        if client_properties:
+            property_data = client_properties[0]
     property_id = property_data.get("id")
     address_data = property_data.get("address", {}) or client_data.get("billingAddress", {})
     
@@ -416,6 +423,7 @@ async def jobber_webhook_endpoint(request: Request):
         client_name=client_name or company_name,
         quote_amount=cost
     )
+    crew_assignment = get_crew_for_tag(job_tag)
     
     estimated_duration = estimate_time(cost) if cost > 0 else timedelta(hours=2)
     if estimated_duration == -1:
@@ -480,7 +488,7 @@ async def jobber_webhook_endpoint(request: Request):
         })
     
     # Notify team and client
-    await notify_team(job_id, f"Job scheduled: {job_title} for {client_name} at {start_slot}",
+    await notify_team(job_id, f"Job scheduled: {job_title} for {client_name} at {start_slot} (crew: {crew_assignment})",
                       access_token=access or "mock_access_token")
     await notify_client(job_id, f"Your job is booked for {start_slot} to {end_slot}",
                         access_token=access or "mock_access_token")
@@ -493,6 +501,7 @@ async def jobber_webhook_endpoint(request: Request):
         "client_id": client_id,
         "client_name": client_name,
         "job_tag": job_tag,
+        "crew_assignment": crew_assignment,
         "booking_status": booking_status,
         "weather_confidence": weather_confidence,
         "city": city
