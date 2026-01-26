@@ -82,7 +82,7 @@ def generate_mock_webhook(quote_id=None):
     }
 
 
-def generate_jobber_webhook(topic="QUOTE_APPROVED", item_id="Q123"):
+def generate_jobber_webhook(topic="QUOTE_APPROVED", item_id="Q123", app_id=None):
     """
     Generate a mock webhook payload in Jobber's ACTUAL format.
     
@@ -92,20 +92,98 @@ def generate_jobber_webhook(topic="QUOTE_APPROVED", item_id="Q123"):
     Args:
         topic: Webhook topic (e.g., QUOTE_APPROVED, QUOTE_CREATE)
         item_id: The ID of the item (quote, client, job) that triggered the event
+        app_id: App ID (defaults to test_client_id from env, or "test-app-id-123")
         
     Returns:
         dict in Jobber's webhook format
     """
+    import os
+    if app_id is None:
+        # Use the test client ID from environment, or default
+        app_id = os.getenv("JOBBER_CLIENT_ID", "test_client_id")
+    
     return {
         "data": {
             "webHookEvent": {
                 "topic": topic,
-                "appId": "test-app-id-123",
+                "appId": app_id,
                 "accountId": "ACC123",
                 "itemId": item_id,
                 "occurredAt": datetime.now().isoformat()
             }
         }
+    }
+
+
+def generate_mock_quote_for_graphql(quote_id="Q123", cost=500.0, client_id="C123", 
+                                    client_name="Test Client", city="Saskatoon"):
+    """
+    Generate a mock quote response that would be returned from Jobber's GraphQL API.
+    
+    This simulates what get_quote() returns after receiving a webhook.
+    Use this to mock JobberClient.get_quote() in tests.
+    
+    Args:
+        quote_id: Quote ID
+        cost: Total price of the quote
+        client_id: Client ID
+        client_name: Client name
+        city: City for the job
+        
+    Returns:
+        dict matching Jobber's GraphQL quote response format
+    """
+    return {
+        "id": quote_id,
+        "quoteNumber": 1001,
+        "quoteStatus": "approved",
+        "title": f"Window Cleaning Service - {quote_id}",
+        "amounts": {
+            "totalPrice": cost,
+            "subtotal": cost,
+        },
+        "client": {
+            "id": client_id,
+            "name": client_name,
+            "isCompany": False,
+            "firstName": client_name.split()[0] if " " in client_name else client_name,
+            "lastName": client_name.split()[-1] if " " in client_name else "",
+            "companyName": None,
+            "billingAddress": {
+                "city": city,
+                "street": "123 Main St",
+                "postalCode": "S7K 1A1",
+                "province": "SK",
+            },
+            "clientProperties": {
+                "nodes": [
+                    {
+                        "id": f"P{quote_id}",
+                        "address": {
+                            "city": city,
+                            "street": "123 Main St",
+                            "postalCode": "S7K 1A1",
+                            "province": "SK",
+                        },
+                    }
+                ]
+            },
+            "phones": [
+                {"number": "306-555-1234", "primary": True}
+            ],
+            "emails": [
+                {"address": f"{client_name.lower().replace(' ', '.')}@example.com", "primary": True}
+            ],
+        },
+        "property": {
+            "id": f"P{quote_id}",
+            "address": {
+                "city": city,
+                "street": "123 Main St",
+                "postalCode": "S7K 1A1",
+                "province": "SK",
+            },
+        },
     }
 
 

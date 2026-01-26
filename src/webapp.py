@@ -595,7 +595,7 @@ async def jobber_webhook_endpoint(request: Request, background_tasks: Background
         })
     
     # ----------------------
-    # Step 6: Classify job and book
+    # Step 6: Classify job and prepare for background processing
     # ----------------------
     job_tag = classify_job_tag(
         address=address,
@@ -608,95 +608,38 @@ async def jobber_webhook_endpoint(request: Request, background_tasks: Background
     if estimated_duration == -1:
         raise HTTPException(status_code=400, detail="Invalid quote cost")
     
-    # Book the job
-    async with BOOK_LOCK:
-        start_datetime = ceil_to_30(tz_now())
-        
-        if start_datetime.hour < 8:
-            start_datetime = start_datetime.replace(hour=8, minute=0, second=0, microsecond=0)
-        elif start_datetime.hour >= 20:
-            start_datetime = (start_datetime + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
-        
-        while not is_workday(start_datetime):
-            start_datetime = (start_datetime + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
-        
-        visits = get_visits()
-        slot = auto_book(visits, start_datetime, estimated_duration, city, client_id, allow_tentative=True)
-        
-        if not slot:
-            raise HTTPException(status_code=400, detail="No available slot found")
-        
-        start_slot = slot["startAt"]
-        end_slot = slot["endAt"]
-        booking_status = slot.get("booking_status", "confirmed")
-        weather_confidence = slot.get("weather_confidence", "unknown")
-        
-        add_visit(start_slot, end_slot, client_id, job_tag, booking_status)
-    
     # ----------------------
-    # Step 7: Create job in Jobber
+    # Step 7: Queue background task and return 202 immediately
     # ----------------------
-    job_title = quote.get("title") or f"Quote {quote_id}"
-    job = await client.create_job(job_title, client_id, property_id)
-    job_id = job.get("id", f"J_{quote_id}")
+    background_tasks.add_task(
+        process_webhook_background,
+        item_id=item_id,
+        quote_id=quote_id,
+        client_id=client_id,
+        client_name=client_name,
+        company_name=company_name,
+        address=address,
+        city=city,
+        cost=cost,
+        property_id=property_id,
+        job_tag=job_tag,
+        crew_assignment=crew_assignment,
+        estimated_duration=estimated_duration,
+        access_token=access or "mock_access_token"
+    )
     
-    # Create visit in Jobber - must succeed before marking as processed
-    # If this fails, we rollback the local booking to allow retry
-    visit_created = False
-    visit_id = None
-    try:
-        visit = await client.create_visit(
-            job_id=job_id,
-            start_at=start_slot,
-            end_at=end_slot,
-            title=job_title
-        )
-        visit_id = visit.get("id") if visit else None
-        visit_created = True
-    except Exception as e:
-        # Visit creation failed - rollback local booking to allow retry
-        from src.db import remove_visit_by_name
-        remove_visit_by_name(client_id)
-        logger.error(f"Could not create visit in Jobber: {e}. Local booking rolled back.", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create visit in Jobber. Booking rolled back. Error: {e}"
-        )
+    logger.info(f"Webhook accepted for quote {quote_id}, processing in background")
     
-    # Only mark as processed after visit creation succeeds
-    try:
-        mark_quote_processed(quote_id, client_id, job_id, start_slot, end_slot)
-    except sqlite3.IntegrityError:
-        # Another worker processed it first - return idempotent response
-        existing = get_processed_quote(quote_id)
-        return JSONResponse({
-            "status": f"Quote {quote_id} already scheduled",
-            "scheduled_start": existing["start_at"],
-            "scheduled_end": existing["end_at"],
-            "job_id": existing["job_id"],
-            "client_id": existing["client_id"],
-            "idempotent": True
-        })
-    
-    # Notify team and client
-    await notify_team(job_id, f"Job scheduled: {job_title} for {client_name} at {start_slot} (crew: {crew_assignment})",
-                      access_token=access or "mock_access_token")
-    await notify_client(job_id, f"Your job is booked for {start_slot} to {end_slot}",
-                        access_token=access or "mock_access_token")
-    
-    return JSONResponse({
-        "status": f"Quote {quote_id} approved and scheduled",
-        "scheduled_start": start_slot,
-        "scheduled_end": end_slot,
-        "job_id": job_id,
-        "client_id": client_id,
-        "client_name": client_name,
-        "job_tag": job_tag,
-        "crew_assignment": crew_assignment,
-        "booking_status": booking_status,
-        "weather_confidence": weather_confidence,
-        "city": city
-    })
+    # Return 202 Accepted immediately (Jobber requires response within 1 second)
+    # Background task will handle the actual processing asynchronously
+    return JSONResponse(
+        {
+            "status": "accepted",
+            "message": f"Quote {quote_id} queued for processing",
+            "quote_id": quote_id
+        },
+        status_code=202
+    )
 
 
 # -------------------

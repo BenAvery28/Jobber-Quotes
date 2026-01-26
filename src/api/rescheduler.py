@@ -310,14 +310,15 @@ def recheck_tentative_bookings(city="Saskatoon"):
             # Remove tentative booking
             remove_visit_by_name(client_id)
             
-            # Try to find a better slot
+            # Try to find a better slot (allow Friday for reschedules)
             new_slot = auto_book(
                 all_visits,
                 tz_now(),
                 duration,
                 city,
                 client_id,
-                allow_tentative=True
+                allow_tentative=True,
+                allow_friday=True  # Allow Friday for reschedules
             )
             
             if new_slot:
