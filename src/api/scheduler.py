@@ -8,7 +8,7 @@
 # - Prepares data to send to Jobber
 
 from datetime import datetime, timedelta
-from src.api.weather import check_weather
+from src.api.weather import check_weather, check_weather_with_confidence
 from src.db import get_visits, add_visit
 
 # 30-minute grace period between bookings
@@ -95,11 +95,12 @@ def check_availability(start_time, duration, visits):
     return True
 
 
-def auto_book(visits, start_date, duration, city, client_id=None):
+def auto_book(visits, start_date, duration, city, client_id=None, allow_tentative=True):
     """
     Find the next available slot for a job.
     - Only books on weekdays (Mon–Thu, excluding Fridays)
-    - Checks weather before booking
+    - Checks weather with confidence levels before booking
+    - Creates tentative bookings for uncertain weather (can be reshuffled later)
     - Uses 30-min increments within 8am–8pm
     - Stops searching after 30 days
     Args:
@@ -108,8 +109,9 @@ def auto_book(visits, start_date, duration, city, client_id=None):
         duration (timedelta): Job length
         city (str): City (for weather check)
         client_id (str): Client ID from Jobber (optional)
+        allow_tentative (bool): If True, allow tentative bookings for uncertain weather
     Returns:
-        dict: {"startAt": str, "endAt": str}
+        dict: {"startAt": str, "endAt": str, "booking_status": str, "weather_confidence": str}
         None: No slot found
     """
 
@@ -118,10 +120,17 @@ def auto_book(visits, start_date, duration, city, client_id=None):
     # add a safety limit to prevent infinite loops
     max_days_to_check = 30
     days_checked = 0
+    
+    # Track best tentative slot if we can't find a confirmed one
+    best_tentative_slot = None
 
     while days_checked < max_days_to_check:
         if is_workday(d):
-            if check_weather(city, d, WORK_START, WORK_END):
+            # Check weather with confidence levels
+            weather_check = check_weather_with_confidence(city, d, WORK_START, WORK_END)
+            
+            # Only proceed if weather is suitable (even if uncertain)
+            if weather_check['suitable']:
                 day_start = d.replace(hour=WORK_START, minute=0)
                 day_end = d.replace(hour=WORK_END, minute=0)
                 slot = day_start
@@ -129,12 +138,44 @@ def auto_book(visits, start_date, duration, city, client_id=None):
                     if check_availability(slot, duration, visits):  # Pass visits
                         start_at = slot.isoformat()
                         end_at = (slot + duration).isoformat()
-                        # Note: add_visit is called from webapp.py with client_id
-                        return {"startAt": start_at, "endAt": end_at}
+                        
+                        # Determine booking status based on weather confidence
+                        if weather_check['confidence'] == 'high':
+                            # High confidence = confirmed booking
+                            return {
+                                "startAt": start_at,
+                                "endAt": end_at,
+                                "booking_status": "confirmed",
+                                "weather_confidence": "high"
+                            }
+                        elif weather_check['confidence'] == 'medium':
+                            # Medium confidence = confirmed (acceptable risk)
+                            return {
+                                "startAt": start_at,
+                                "endAt": end_at,
+                                "booking_status": "confirmed",
+                                "weather_confidence": "medium"
+                            }
+                        elif allow_tentative and weather_check['confidence'] == 'low':
+                            # Low confidence = tentative booking (can reshuffle)
+                            # Store as best tentative, but keep looking for better
+                            if best_tentative_slot is None:
+                                best_tentative_slot = {
+                                    "startAt": start_at,
+                                    "endAt": end_at,
+                                    "booking_status": "tentative",
+                                    "weather_confidence": "low"
+                                }
+                            # Continue searching for better slot
+                        # If confidence is 'bad', skip this slot
                     slot += timedelta(minutes=30)
 
         d = (d + timedelta(days=1)).replace(hour=WORK_START, minute=0, second=0, microsecond=0)
         days_checked += 1
+
+    # If we found a tentative slot and no confirmed one, return it
+    if best_tentative_slot and allow_tentative:
+        return best_tentative_slot
 
     # return none if no slot found after max days
     return None

@@ -185,15 +185,16 @@ def check_weather_with_confidence(city, date, start_hour=8, end_hour=20):
 
 def get_next_suitable_weather_slot(city, start_datetime, duration_hours):
     """
-    Find the next suitable weather window for a job using free forecast API
+    Find the next suitable weather window for a job using free forecast API.
+    Uses 2-day forecast for better accuracy.
     Args:
         city (str): City name
         start_datetime (datetime): Earliest possible start time
         duration_hours (float): Job duration in hours
     Returns:
-        dict: {"start": datetime, "end": datetime} or None if no suitable slot
+        dict: {"start": datetime, "end": datetime, "confidence": str} or None if no suitable slot
     """
-    forecast = get_hourly_forecast(city, days_ahead=4)
+    forecast = get_hourly_forecast(city, days_ahead=2)
     if not forecast or 'list' not in forecast:
         return None
 
@@ -212,12 +213,21 @@ def get_next_suitable_weather_slot(city, start_datetime, duration_hours):
         if weather_main not in ["Snow", "Thunderstorm"] and pop <= 0.5:
             # For 3-hour intervals, we'll assume the weather is good for the duration
             slot_end = forecast_time + timedelta(hours=duration_hours)
+            
+            # Determine confidence
+            if pop < 0.2:
+                confidence = "high"
+            elif pop < 0.4:
+                confidence = "medium"
+            else:
+                confidence = "low"
 
             return {
                 "start": forecast_time,
                 "end": slot_end,
                 "pop": pop,
-                "weather": weather_main
+                "weather": weather_main,
+                "confidence": confidence
             }
 
     return None

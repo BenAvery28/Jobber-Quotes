@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from src.api.scheduler import auto_book, is_workday, estimate_time
 from src.api.jobber_client import create_job, notify_team, notify_client
 from src.api.rescheduler import cancel_appointment, run_daily_weather_check, compact_schedule, \
-    check_weather_impact_on_schedule
+    check_weather_impact_on_schedule, recheck_tentative_bookings
 from src.api.job_classifier import classify_job_tag
 from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_KEY
 import secrets
@@ -235,15 +235,17 @@ async def book_job_endpoint(request: Request):
             start_datetime = (start_datetime + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
 
         visits = get_visits()
-        slot = auto_book(visits, start_datetime, estimated_duration, city, client_id)
+        slot = auto_book(visits, start_datetime, estimated_duration, city, client_id, allow_tentative=True)
         if not slot:
             raise HTTPException(status_code=400, detail="No available slot")
 
         start_slot = slot["startAt"]
         end_slot = slot["endAt"]
+        booking_status = slot.get("booking_status", "confirmed")
+        weather_confidence = slot.get("weather_confidence", "unknown")
 
-        # Pass client_id and job_tag to add_visit
-        add_visit(start_slot, end_slot, client_id, job_tag)
+        # Pass client_id, job_tag, and booking_status to add_visit
+        add_visit(start_slot, end_slot, client_id, job_tag, booking_status)
 
     job_response = await create_job(f"Quote {quote_id}", start_slot, end_slot,
                                     access_token=access or "mock_access_token")
@@ -276,7 +278,9 @@ async def book_job_endpoint(request: Request):
         "cost": cost,
         "job_id": job_id,
         "client_id": client_id,
-        "job_tag": job_tag
+        "job_tag": job_tag,
+        "booking_status": booking_status,
+        "weather_confidence": weather_confidence
     })
 
 
@@ -329,6 +333,20 @@ async def run_weather_check():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Weather check failed: {e}")
+
+
+@app.get("/recheck-tentative-bookings")
+async def recheck_tentative():
+    """
+    Recheck tentative bookings and reshuffle if weather improves or deteriorates.
+    This is the pseudo-reshuffler endpoint.
+    """
+    try:
+        result = recheck_tentative_bookings("Saskatoon")
+        return JSONResponse(result)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Tentative booking recheck failed: {e}")
 
 
 @app.post("/optimize-schedule")

@@ -33,6 +33,12 @@ def init_db():
         except sqlite3.OperationalError:
             # Column already exists, ignore
             pass
+        # Add booking_status column for tentative bookings (pseudo-reshuffler)
+        try:
+            conn.execute("ALTER TABLE calander ADD COLUMN booking_status TEXT DEFAULT 'confirmed'")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore
+            pass
     conn.execute("""
                 CREATE TABLE IF NOT EXISTS processed_quotes (
                     quote_id TEXT PRIMARY KEY,
@@ -45,20 +51,44 @@ def init_db():
             """)
 
 
-def get_visits():
+def get_visits(include_tentative=True):
     """
     Fetch all bookings from the calander.
-    Returns: list of dicts {date, client_id, startAt, endAt, job_tag}
+    Args:
+        include_tentative: If False, only return confirmed bookings
+    Returns: list of dicts {date, client_id, startAt, endAt, job_tag, booking_status}
     """
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("SELECT date, client_id, start_time, finish_time, COALESCE(job_tag, 'residential') FROM calander")
+        if include_tentative:
+            cursor = conn.execute("""
+                SELECT date, client_id, start_time, finish_time, 
+                       COALESCE(job_tag, 'residential'), 
+                       COALESCE(booking_status, 'confirmed')
+                FROM calander
+            """)
+        else:
+            cursor = conn.execute("""
+                SELECT date, client_id, start_time, finish_time, 
+                       COALESCE(job_tag, 'residential'), 
+                       COALESCE(booking_status, 'confirmed')
+                FROM calander
+                WHERE COALESCE(booking_status, 'confirmed') = 'confirmed'
+            """)
         return [
-            {"date": date, "client_id": client_id, "startAt": start_time, "endAt": finish_time, "job_tag": job_tag or "residential"}
-            for date, client_id, start_time, finish_time, job_tag in cursor.fetchall()
+            {
+                "date": date, 
+                "client_id": client_id, 
+                "startAt": start_time, 
+                "endAt": finish_time, 
+                "job_tag": job_tag or "residential",
+                "booking_status": booking_status or "confirmed"
+            }
+            for date, client_id, start_time, finish_time, job_tag, booking_status in cursor.fetchall()
         ]
 
 
-def add_visit(start_at: str, end_at: str, client_id: str = None, job_tag: str = "residential"):
+def add_visit(start_at: str, end_at: str, client_id: str = None, job_tag: str = "residential", 
+              booking_status: str = "confirmed"):
     """
     Add a visit (job booking) to the calander.
     The date is extracted from start_at (YYYY-MM-DD).
@@ -68,6 +98,7 @@ def add_visit(start_at: str, end_at: str, client_id: str = None, job_tag: str = 
         end_at: End time (ISO format)
         client_id: Client ID from Jobber
         job_tag: Job classification ('commercial' or 'residential', default 'residential')
+        booking_status: 'confirmed' or 'tentative' (default 'confirmed')
     """
     job_date = datetime.fromisoformat(start_at).strftime("%Y-%m-%d")
     if client_id is None:
@@ -76,13 +107,67 @@ def add_visit(start_at: str, end_at: str, client_id: str = None, job_tag: str = 
     # Ensure job_tag is valid
     if job_tag not in ["commercial", "residential"]:
         job_tag = "residential"
+    
+    # Ensure booking_status is valid
+    if booking_status not in ["confirmed", "tentative"]:
+        booking_status = "confirmed"
 
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT INTO calander (date, client_id, start_time, finish_time, job_tag) VALUES (?, ?, ?, ?, ?)",
-            (job_date, client_id, start_at, end_at, job_tag),
+            """INSERT INTO calander (date, client_id, start_time, finish_time, job_tag, booking_status) 
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (job_date, client_id, start_at, end_at, job_tag, booking_status),
         )
         conn.commit()
+
+
+def update_booking_status(client_id: str, start_at: str, new_status: str):
+    """
+    Update the booking status for a specific booking.
+    Used by pseudo-reshuffler to confirm tentative bookings or make them tentative.
+    
+    Args:
+        client_id: Client ID
+        start_at: Start time (ISO format) to identify the booking
+        new_status: 'confirmed' or 'tentative'
+    Returns:
+        int: Number of rows updated
+    """
+    if new_status not in ["confirmed", "tentative"]:
+        raise ValueError("booking_status must be 'confirmed' or 'tentative'")
+    
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("""
+            UPDATE calander 
+            SET booking_status = ?
+            WHERE client_id = ? AND start_time = ?
+        """, (new_status, client_id, start_at))
+        conn.commit()
+        return cursor.rowcount
+
+
+def get_tentative_bookings():
+    """
+    Get all tentative bookings that can be reshuffled.
+    Returns: list of dicts with booking details
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("""
+            SELECT date, client_id, start_time, finish_time, 
+                   COALESCE(job_tag, 'residential')
+            FROM calander
+            WHERE COALESCE(booking_status, 'confirmed') = 'tentative'
+        """)
+        return [
+            {
+                "date": date,
+                "client_id": client_id,
+                "startAt": start_time,
+                "endAt": finish_time,
+                "job_tag": job_tag or "residential"
+            }
+            for date, client_id, start_time, finish_time, job_tag in cursor.fetchall()
+        ]
 
 
 def clear_visits():

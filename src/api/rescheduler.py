@@ -6,9 +6,9 @@
 # 3. Shifts all affected jobs to next available suitable slots
 
 from datetime import datetime, timedelta
-from src.db import get_visits, remove_visit_by_name, add_visit, clear_visits
-from src.api.weather import check_weather, get_next_suitable_weather_slot
-from src.api.scheduler import is_workday, WORK_START, WORK_END
+from src.db import get_visits, remove_visit_by_name, add_visit, clear_visits, get_tentative_bookings, update_booking_status
+from src.api.weather import check_weather, get_next_suitable_weather_slot, check_weather_with_confidence
+from src.api.scheduler import is_workday, WORK_START, WORK_END, auto_book, estimate_time
 from src.api.jobber_client import create_job, notify_team, notify_client
 import asyncio
 
@@ -238,6 +238,116 @@ def run_daily_weather_check(city="Saskatoon"):
     print(f"Weather check complete. Rescheduled {reschedule_result['successfully_rescheduled']} jobs.")
 
     return reschedule_result
+
+
+def recheck_tentative_bookings(city="Saskatoon"):
+    """
+    Recheck tentative bookings and upgrade to confirmed if weather improves,
+    or reshuffle if weather deteriorates. This is the pseudo-reshuffler.
+    
+    Args:
+        city (str): City for weather checking
+    Returns:
+        dict: Summary of reshuffling actions
+    """
+    tentative_bookings = get_tentative_bookings()
+    
+    if not tentative_bookings:
+        return {
+            "checked": 0,
+            "upgraded_to_confirmed": 0,
+            "reshuffled": 0,
+            "no_change": 0,
+            "details": []
+        }
+    
+    result = {
+        "checked": len(tentative_bookings),
+        "upgraded_to_confirmed": 0,
+        "reshuffled": 0,
+        "no_change": 0,
+        "details": []
+    }
+    
+    # Get all visits (including confirmed) for availability checking
+    all_visits = get_visits(include_tentative=False)  # Only confirmed for conflict checking
+    
+    for booking in tentative_bookings:
+        client_id = booking['client_id']
+        start_time = datetime.fromisoformat(booking['startAt'])
+        end_time = datetime.fromisoformat(booking['endAt'])
+        duration = end_time - start_time
+        
+        # Only check bookings that are still in the future
+        if start_time <= datetime.now():
+            continue
+        
+        # Recheck weather with confidence
+        weather_check = check_weather_with_confidence(city, start_time, start_time.hour, end_time.hour)
+        
+        if weather_check['confidence'] == 'high' or weather_check['confidence'] == 'medium':
+            # Weather improved - upgrade to confirmed
+            update_booking_status(client_id, booking['startAt'], 'confirmed')
+            result["upgraded_to_confirmed"] += 1
+            result["details"].append({
+                "client_id": client_id,
+                "action": "upgraded_to_confirmed",
+                "reason": f"Weather improved: {weather_check['reason']}"
+            })
+        elif weather_check['confidence'] == 'bad':
+            # Weather deteriorated - try to reshuffle
+            # Remove tentative booking
+            remove_visit_by_name(client_id)
+            
+            # Try to find a better slot
+            new_slot = auto_book(
+                all_visits,
+                datetime.now(),
+                duration,
+                city,
+                client_id,
+                allow_tentative=True
+            )
+            
+            if new_slot:
+                # Add new booking (could be tentative or confirmed)
+                from src.db import get_visits as get_all_visits
+                all_visits_updated = get_all_visits(include_tentative=False)
+                add_visit(
+                    new_slot["startAt"],
+                    new_slot["endAt"],
+                    client_id,
+                    booking.get('job_tag', 'residential'),
+                    new_slot.get("booking_status", "confirmed")
+                )
+                result["reshuffled"] += 1
+                result["details"].append({
+                    "client_id": client_id,
+                    "action": "reshuffled",
+                    "old_start": booking['startAt'],
+                    "new_start": new_slot["startAt"],
+                    "new_status": new_slot.get("booking_status", "confirmed")
+                })
+            else:
+                # Couldn't find better slot - keep original (re-add it)
+                add_visit(
+                    booking['startAt'],
+                    booking['endAt'],
+                    client_id,
+                    booking.get('job_tag', 'residential'),
+                    'tentative'
+                )
+                result["no_change"] += 1
+                result["details"].append({
+                    "client_id": client_id,
+                    "action": "no_change",
+                    "reason": "No better slot available"
+                })
+        else:
+            # Still low confidence - keep as tentative
+            result["no_change"] += 1
+    
+    return result
 
 
 def compact_schedule():
