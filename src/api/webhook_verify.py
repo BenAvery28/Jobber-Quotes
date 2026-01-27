@@ -116,3 +116,6 @@ JOB_TOPICS = [
     "JOB_COMPLETE",
 ]
 
+# App disconnect topic - required for App Marketplace
+APP_DISCONNECT_TOPIC = "APP_DISCONNECT"
+

@@ -29,8 +29,11 @@ class JobberClient:
             "Content-Type": "application/json",
         }
     
-    async def _execute_query(self, query: str, variables: dict = None) -> dict:
-        """Execute a GraphQL query/mutation against Jobber API with retry logic."""
+    async def _execute_query(self, query: str, variables: dict = None, retry_on_401: bool = True) -> dict:
+        """
+        Execute a GraphQL query/mutation against Jobber API with retry logic.
+        Automatically handles 401 errors by refreshing the access token.
+        """
         if TEST_MODE:
             return self._mock_response(query, variables)
         
@@ -38,18 +41,55 @@ class JobberClient:
         if variables:
             payload["variables"] = variables
         
-        async def _make_request():
+        async def _make_request(access_token: str = None):
+            # Use provided token or fall back to instance token
+            token = access_token or self.access_token
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     JOBBER_GRAPHQL_URL,
                     json=payload,
-                    headers=self.headers,
+                    headers=headers,
                     timeout=30.0
                 )
+                
+                # Handle 401 Unauthorized - token expired
+                if response.status_code == 401 and retry_on_401:
+                    logger.warning("Received 401 Unauthorized - attempting token refresh")
+                    # Try to refresh token
+                    new_token = await self._refresh_token()
+                    if new_token:
+                        # Retry request with new token
+                        self.access_token = new_token
+                        headers["Authorization"] = f"Bearer {new_token}"
+                        response = await client.post(
+                            JOBBER_GRAPHQL_URL,
+                            json=payload,
+                            headers=headers,
+                            timeout=30.0
+                        )
+                    else:
+                        # Refresh failed - raise error
+                        logger.error("Token refresh failed - re-authorization required")
+                        response.raise_for_status()
+                
                 response.raise_for_status()
-                return response.json()
+                result = response.json()
+                
+                # Check for GraphQL errors in response
+                if "errors" in result:
+                    error_messages = [err.get("message", "Unknown error") for err in result["errors"]]
+                    logger.error(f"GraphQL errors: {error_messages}")
+                    # Don't raise here - let caller handle based on context
+                
+                return result
         
         # Retry with exponential backoff for network errors and 5xx errors
+        # Note: 401 errors are handled inside _make_request
         return await retry_with_backoff(
             _make_request,
             max_retries=3,
@@ -60,6 +100,81 @@ class JobberClient:
                 f"Jobber API request failed (attempt {attempt}), retrying in {delay}s: {error}"
             )
         )
+    
+    async def _refresh_token(self) -> str:
+        """
+        Refresh the access token using the refresh token.
+        This is called automatically when a 401 error is encountered.
+        """
+        import os
+        from src.db import get_token, save_token, delete_token
+        from datetime import timedelta
+        from datetime import datetime as dt
+        
+        refresh_token_data = get_token("refresh_token")
+        if not refresh_token_data or not refresh_token_data.get("token"):
+            logger.error("No refresh token available for refresh")
+            return None
+        
+        refresh_token = refresh_token_data["token"]
+        token_url = "https://api.getjobber.com/api/oauth/token"
+        
+        client_id = os.getenv("JOBBER_CLIENT_ID")
+        client_secret = os.getenv("JOBBER_CLIENT_SECRET")
+        redirect_uri = os.getenv("JOBBER_REDIRECT_URI", "http://localhost:8000/oauth/callback")
+        
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    token_url,
+                    data=data,  # form-urlencoded
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=30.0
+                )
+                
+                if response.status_code != 200:
+                    error_detail = response.text
+                    logger.error(f"Token refresh failed: {response.status_code} - {error_detail}")
+                    # Clear tokens on failure
+                    delete_token("access_token")
+                    delete_token("refresh_token")
+                    return None
+                
+                token_data = response.json()
+                new_access_token = token_data.get("access_token")
+                new_refresh_token = token_data.get("refresh_token")
+                
+                if not new_access_token:
+                    logger.error("Token refresh response missing access_token")
+                    return None
+                
+                # Store new access token (expires in 60 minutes)
+                from src.timezone_utils import now as tz_now
+                expires_at = (tz_now() + timedelta(minutes=55)).isoformat()
+                save_token("access_token", new_access_token, expires_at)
+                
+                # Store new refresh token if provided (Refresh Token Rotation may be ON)
+                if new_refresh_token:
+                    save_token("refresh_token", new_refresh_token)
+                    logger.info("Access token refreshed successfully (refresh token rotated)")
+                else:
+                    logger.info("Access token refreshed successfully (refresh token unchanged)")
+                
+                return new_access_token
+                
+        except Exception as e:
+            logger.error(f"Token refresh exception: {e}", exc_info=True)
+            # Clear tokens on error
+            delete_token("access_token")
+            delete_token("refresh_token")
+            return None
     
     def _mock_response(self, query: str, variables: dict = None) -> dict:
         """Return mock responses for testing."""
@@ -283,6 +398,22 @@ class JobberClient:
         result = await self._execute_query(query, {"id": client_id})
         return result.get("data", {}).get("client")
     
+    async def get_account(self) -> dict:
+        """
+        Fetch account details (name and id) for tracking which Jobber account is connected.
+        Recommended to call after OAuth to track account info.
+        """
+        query = """
+        query GetAccount {
+            account {
+                id
+                name
+            }
+        }
+        """
+        result = await self._execute_query(query)
+        return result.get("data", {}).get("account")
+    
     # ==================
     # MUTATIONS
     # ==================
@@ -327,13 +458,23 @@ class JobberClient:
         
         result = await self._execute_query(mutation, {"input": input_data})
         
-        # Check for errors
+        # Check for GraphQL errors
+        if "errors" in result:
+            error_messages = [err.get("message", "Unknown error") for err in result["errors"]]
+            raise ValueError(f"GraphQL errors: {error_messages}")
+        
+        # Check for userErrors in mutation response
         job_create = result.get("data", {}).get("jobCreate", {})
         if job_create.get("userErrors"):
             errors = job_create["userErrors"]
-            raise ValueError(f"Jobber API errors: {errors}")
+            error_messages = [err.get("message", "Unknown error") for err in errors]
+            raise ValueError(f"Jobber API userErrors: {error_messages}")
         
-        return job_create.get("job")
+        job = job_create.get("job")
+        if not job:
+            raise ValueError("Job creation succeeded but no job returned")
+        
+        return job
     
     async def create_visit(
         self,
@@ -390,12 +531,23 @@ class JobberClient:
         
         result = await self._execute_query(mutation, {"input": input_data})
         
+        # Check for GraphQL errors
+        if "errors" in result:
+            error_messages = [err.get("message", "Unknown error") for err in result["errors"]]
+            raise ValueError(f"GraphQL errors: {error_messages}")
+        
+        # Check for userErrors in mutation response
         visit_create = result.get("data", {}).get("visitCreate", {})
         if visit_create.get("userErrors"):
             errors = visit_create["userErrors"]
-            raise ValueError(f"Jobber API errors: {errors}")
+            error_messages = [err.get("message", "Unknown error") for err in errors]
+            raise ValueError(f"Jobber API userErrors: {error_messages}")
         
-        return visit_create.get("visit")
+        visit = visit_create.get("visit")
+        if not visit:
+            raise ValueError("Visit creation succeeded but no visit returned")
+        
+        return visit
     
     async def reschedule_visit(
         self,
@@ -437,12 +589,60 @@ class JobberClient:
             }
         })
         
+        # Check for GraphQL errors
+        if "errors" in result:
+            error_messages = [err.get("message", "Unknown error") for err in result["errors"]]
+            raise ValueError(f"GraphQL errors: {error_messages}")
+        
+        # Check for userErrors in mutation response
         visit_reschedule = result.get("data", {}).get("visitReschedule", {})
         if visit_reschedule.get("userErrors"):
             errors = visit_reschedule["userErrors"]
-            raise ValueError(f"Jobber API errors: {errors}")
+            error_messages = [err.get("message", "Unknown error") for err in errors]
+            raise ValueError(f"Jobber API userErrors: {error_messages}")
         
-        return visit_reschedule.get("visit")
+        visit = visit_reschedule.get("visit")
+        if not visit:
+            raise ValueError("Visit reschedule succeeded but no visit returned")
+        
+        return visit
+    
+    async def disconnect_app(self) -> dict:
+        """
+        Disconnect the app from the Jobber account.
+        This should be called when a user disconnects the app from your system.
+        Per Jobber docs, this is required for App Marketplace compliance.
+        
+        Returns:
+            Disconnect result with app info
+        """
+        mutation = """
+        mutation Disconnect {
+            appDisconnect {
+                app {
+                    name
+                    author
+                }
+                userErrors {
+                    message
+                }
+            }
+        }
+        """
+        result = await self._execute_query(mutation)
+        
+        # Check for GraphQL errors
+        if "errors" in result:
+            error_messages = [err.get("message", "Unknown error") for err in result["errors"]]
+            raise ValueError(f"GraphQL errors: {error_messages}")
+        
+        app_disconnect = result.get("data", {}).get("appDisconnect", {})
+        if app_disconnect.get("userErrors"):
+            errors = app_disconnect["userErrors"]
+            error_messages = [err.get("message", "Unknown error") for err in errors]
+            raise ValueError(f"Jobber API userErrors: {error_messages}")
+        
+        return app_disconnect
 
 
 # ==================

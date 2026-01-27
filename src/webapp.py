@@ -18,13 +18,13 @@ from src.api.rescheduler import cancel_appointment, run_daily_weather_check, com
 from src.api.job_classifier import classify_job_tag, get_crew_for_tag
 from src.api.recurring_jobs import create_recurring_job, generate_bookings_from_recurring_job, \
     book_entire_summer
-from src.api.webhook_verify import verify_jobber_webhook, parse_webhook_payload, QUOTE_TOPICS, validate_webhook_app_id
+from src.api.webhook_verify import verify_jobber_webhook, parse_webhook_payload, QUOTE_TOPICS, APP_DISCONNECT_TOPIC, validate_webhook_app_id
 from src.db import get_recurring_jobs, deactivate_recurring_job
 from config.settings import JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, JOBBER_API_KEY
 import secrets
 from fastapi.responses import HTMLResponse
 from testing.mock_data import generate_mock_webhook
-from src.db import init_db, get_visits, add_visit, get_processed_quote, mark_quote_processed, save_token, get_token
+from src.db import init_db, get_visits, add_visit, get_processed_quote, mark_quote_processed, save_token, get_token, delete_token
 from src.logging_config import setup_logging
 
 # Initialize logging
@@ -61,14 +61,67 @@ if not JOBBER_CLIENT_SECRET:
 STATE = {"value": None}
 
 # Helper functions for token management
-def get_access_token():
-    """Get access token from database, with fallback for test mode."""
+def get_access_token() -> str:
+    """
+    Get access token from database, with fallback for test mode.
+    Checks expiration and refreshes if needed (synchronously - for background tasks).
+    """
     if in_test_mode():
         return "mock_access_token"
+    
     token_data = get_token("access_token")
-    if token_data and token_data.get("token"):
-        return token_data["token"]
-    return None
+    if not token_data or not token_data.get("token"):
+        return None
+    
+    # Check if token is expired or about to expire (within 5 minutes)
+    expires_at_str = token_data.get("expires_at")
+    if expires_at_str:
+        try:
+            expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+            now = tz_now()
+            # Refresh if expired or expires within 5 minutes
+            if expires_at <= now or (expires_at - now).total_seconds() < 300:
+                logger.info("Access token expired or expiring soon, refreshing...")
+                # Note: This is a sync function, so we can't await refresh_access_token
+                # The JobberClient will handle 401 errors and refresh asynchronously
+                return token_data["token"]  # Return current token, let client handle refresh
+        except (ValueError, AttributeError) as e:
+            logger.warning(f"Could not parse token expiration: {e}")
+    
+    return token_data["token"]
+
+
+async def get_access_token_async() -> str:
+    """
+    Get access token with async refresh support.
+    Use this in async contexts where we can refresh tokens.
+    """
+    if in_test_mode():
+        return "mock_access_token"
+    
+    token_data = get_token("access_token")
+    if not token_data or not token_data.get("token"):
+        return None
+    
+    # Check if token is expired or about to expire (within 5 minutes)
+    expires_at_str = token_data.get("expires_at")
+    if expires_at_str:
+        try:
+            expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+            now = tz_now()
+            # Refresh if expired or expires within 5 minutes
+            if expires_at <= now or (expires_at - now).total_seconds() < 300:
+                logger.info("Access token expired or expiring soon, refreshing...")
+                new_token = await refresh_access_token()
+                if new_token:
+                    return new_token
+                # If refresh failed, return None to trigger re-auth
+                return None
+        except (ValueError, AttributeError) as e:
+            logger.warning(f"Could not parse token expiration: {e}")
+    
+    return token_data["token"]
+
 
 def set_access_token(token: str, expires_at: str = None):
     """Save access token to database."""
@@ -119,6 +172,220 @@ async def start_auth():
         },
     )
     return RedirectResponse(str(url))
+
+
+@app.get("/oauth/callback")
+async def oauth_callback(code: str = None, state: str = None, error: str = None):
+    """
+    Handle OAuth callback from Jobber.
+    Exchanges authorization code for access and refresh tokens.
+    """
+    if in_test_mode():
+        set_access_token("mock_access_token")
+        return HTMLResponse("""
+        <html>
+            <body>
+                <h1>Mock OAuth Successful</h1>
+                <p>In test mode, tokens are mocked.</p>
+            </body>
+        </html>
+        """)
+    
+    # Handle user denial
+    if error:
+        logger.error(f"OAuth authorization denied: {error}")
+        return HTMLResponse("""
+        <html>
+            <body>
+                <h1>Authorization Denied</h1>
+                <p>The user denied access to the application.</p>
+            </body>
+        </html>
+        """, status_code=403)
+    
+    # Validate state parameter (CSRF protection)
+    if not state or state != STATE.get("value"):
+        logger.warning("OAuth callback state mismatch - possible CSRF attack")
+        return HTMLResponse("""
+        <html>
+            <body>
+                <h1>Authorization Failed</h1>
+                <p>State parameter mismatch. Please try again.</p>
+            </body>
+        </html>
+        """, status_code=400)
+    
+    if not code:
+        logger.error("OAuth callback missing authorization code")
+        return HTMLResponse("""
+        <html>
+            <body>
+                <h1>Authorization Failed</h1>
+                <p>Missing authorization code. Please try again.</p>
+            </body>
+        </html>
+        """, status_code=400)
+    
+    # Exchange authorization code for tokens
+    try:
+        token_data = await exchange_authorization_code(code)
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        
+        if not access_token or not refresh_token:
+            raise ValueError("Missing tokens in response")
+        
+        # Store tokens in database
+        # Access tokens expire in 60 minutes (default), but we'll refresh proactively
+        # Calculate expiration: 60 minutes from now
+        from datetime import timedelta
+        expires_at = (tz_now() + timedelta(minutes=55)).isoformat()  # Refresh 5 min early
+        
+        set_access_token(access_token, expires_at)
+        save_token("refresh_token", refresh_token)
+        
+        # Clear state after successful exchange
+        STATE["value"] = None
+        
+        # Get account info for logging/tracking
+        try:
+            client = JobberClient(access_token)
+            account = await client.get_account()
+            account_name = account.get("name", "Unknown") if account else "Unknown"
+            account_id = account.get("id", "Unknown") if account else "Unknown"
+            logger.info(f"OAuth successful - Account: {account_name} (ID: {account_id})")
+        except Exception as e:
+            logger.warning(f"Could not fetch account info after OAuth: {e}")
+        
+        return HTMLResponse("""
+        <html>
+            <body>
+                <h1>Authorization Successful!</h1>
+                <p>Your application has been successfully connected to Jobber.</p>
+                <p>You can close this window.</p>
+            </body>
+        </html>
+        """)
+        
+    except Exception as e:
+        logger.error(f"OAuth token exchange failed: {e}", exc_info=True)
+        return HTMLResponse(f"""
+        <html>
+            <body>
+                <h1>Authorization Failed</h1>
+                <p>Failed to exchange authorization code: {str(e)}</p>
+                <p>Please try again.</p>
+            </body>
+        </html>
+        """, status_code=500)
+
+
+async def exchange_authorization_code(code: str) -> dict:
+    """
+    Exchange authorization code for access and refresh tokens.
+    
+    Per Jobber docs:
+    POST /api/oauth/token
+    Content-Type: application/x-www-form-urlencoded
+    """
+    token_url = "https://api.getjobber.com/api/oauth/token"
+    
+    data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": JOBBER_CLIENT_ID,
+        "client_secret": JOBBER_CLIENT_SECRET,
+        "redirect_uri": REDIRECT_URI,
+    }
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            token_url,
+            data=data,  # form-urlencoded
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30.0
+        )
+        
+        if response.status_code != 200:
+            error_detail = response.text
+            logger.error(f"Token exchange failed: {response.status_code} - {error_detail}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Token exchange failed: {error_detail}"
+            )
+        
+        return response.json()
+
+
+async def refresh_access_token() -> str:
+    """
+    Refresh the access token using the stored refresh token.
+    
+    Per Jobber docs:
+    POST /api/oauth/token
+    Content-Type: application/x-www-form-urlencoded
+    grant_type=refresh_token
+    """
+    refresh_token_data = get_token("refresh_token")
+    if not refresh_token_data or not refresh_token_data.get("token"):
+        logger.error("No refresh token available - re-authorization required")
+        return None
+    
+    refresh_token = refresh_token_data["token"]
+    token_url = "https://api.getjobber.com/api/oauth/token"
+    
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": JOBBER_CLIENT_ID,
+        "client_secret": JOBBER_CLIENT_SECRET,
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                token_url,
+                data=data,  # form-urlencoded
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=30.0
+            )
+            
+            if response.status_code != 200:
+                error_detail = response.text
+                logger.error(f"Token refresh failed: {response.status_code} - {error_detail}")
+                # If refresh fails, clear tokens and require re-auth
+                delete_token("access_token")
+                delete_token("refresh_token")
+                return None
+            
+            token_data = response.json()
+            new_access_token = token_data.get("access_token")
+            new_refresh_token = token_data.get("refresh_token")
+            
+            if not new_access_token:
+                logger.error("Token refresh response missing access_token")
+                return None
+            
+            # Store new access token (expires in 60 minutes)
+            from datetime import timedelta
+            expires_at = (tz_now() + timedelta(minutes=55)).isoformat()
+            set_access_token(new_access_token, expires_at)
+            
+            # Store new refresh token if provided (Refresh Token Rotation may be ON)
+            if new_refresh_token:
+                save_token("refresh_token", new_refresh_token)
+                logger.info("Access token refreshed successfully (refresh token rotated)")
+            else:
+                logger.info("Access token refreshed successfully (refresh token unchanged)")
+            
+            return new_access_token
+            
+    except Exception as e:
+        logger.error(f"Token refresh exception: {e}", exc_info=True)
+        # Clear tokens on error
+        delete_token("access_token")
+        delete_token("refresh_token")
+        return None
 
 
 # -------------------
@@ -230,9 +497,9 @@ async def book_job_endpoint(request: Request):
     # ----------------------
     # Step 2: Authentication check
     # ----------------------
-    access = get_access_token()
+    access = await get_access_token_async()
     if not access and not in_test_mode():
-        raise HTTPException(status_code=401, detail="Not authorized")
+        raise HTTPException(status_code=401, detail="Not authorized - please complete OAuth flow at /auth")
 
     # ----------------------
     # Step 3: Business logic
@@ -510,6 +777,18 @@ async def jobber_webhook_endpoint(request: Request, background_tasks: Background
     # Step 3: Handle different webhook topics
     # ----------------------
     
+    # Handle APP_DISCONNECT webhook (required for App Marketplace)
+    if topic == APP_DISCONNECT_TOPIC:
+        logger.warning(f"APP_DISCONNECT webhook received for account {webhook_event.get('account_id')}")
+        # Clear all tokens - app has been disconnected
+        delete_token("access_token")
+        delete_token("refresh_token")
+        logger.info("OAuth tokens cleared due to app disconnect")
+        return JSONResponse({
+            "status": "disconnected",
+            "message": "App disconnected successfully, tokens cleared"
+        })
+    
     # Only process quote-related topics
     if topic not in QUOTE_TOPICS:
         return JSONResponse({
@@ -533,9 +812,9 @@ async def jobber_webhook_endpoint(request: Request, background_tasks: Background
     # ----------------------
     # Step 4: Get access token and fetch quote details
     # ----------------------
-    access = get_access_token()
+    access = await get_access_token_async()
     if not access and not in_test_mode():
-        raise HTTPException(status_code=401, detail="Not authorized - no access token")
+        raise HTTPException(status_code=401, detail="Not authorized - please complete OAuth flow at /auth")
     
     # Fetch full quote details from Jobber API
     client = JobberClient(access or "mock_access_token")
@@ -663,7 +942,7 @@ async def cancel_appointment_endpoint(request: Request):
 
         # Notify about rescheduled jobs if any
         if result.get("rescheduled_jobs"):
-            access_token = get_access_token() or "mock_access_token"
+            access_token = await get_access_token_async() or "mock_access_token"
             from src.api.rescheduler import notify_rescheduled_jobs
             await notify_rescheduled_jobs(result["rescheduled_jobs"], access_token)
 
@@ -683,7 +962,7 @@ async def run_weather_check():
 
         # Notify about rescheduled jobs if any
         if result.get("rescheduled_jobs"):
-            access_token = get_access_token() or "mock_access_token"
+            access_token = await get_access_token_async() or "mock_access_token"
             from src.api.rescheduler import notify_rescheduled_jobs
             await notify_rescheduled_jobs(result["rescheduled_jobs"], access_token)
 
