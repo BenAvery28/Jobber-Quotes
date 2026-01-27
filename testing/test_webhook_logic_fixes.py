@@ -9,7 +9,7 @@ Tests for webhook logic fixes:
 import os
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Set environment variables before importing
 os.environ.setdefault("JOBBER_CLIENT_ID", "test_client_id")
@@ -60,26 +60,38 @@ class TestVisitCreationFailureRollback:
         
         mock_job = {"id": "J_TEST"}
         
-        with patch('src.webapp.JobberClient') as mock_client_class:
-            mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
-            mock_client.get_quote = AsyncMock(return_value=mock_quote)
-            mock_client.create_job = AsyncMock(return_value=mock_job)
-            mock_client.create_visit = AsyncMock(side_effect=Exception("Visit creation failed"))
+        # Mock weather API and background task
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                with patch('src.webapp.JobberClient') as mock_client_class:
+                    mock_client = MagicMock()
+                    mock_client_class.return_value = mock_client
+                    mock_client.get_quote = AsyncMock(return_value=mock_quote)
+                    mock_client.create_job = AsyncMock(return_value=mock_job)
+                    mock_client.create_visit = AsyncMock(side_effect=Exception("Visit creation failed"))
+                    
+                    response = client.post("/webhook/jobber", json=webhook)
             
-            response = client.post("/webhook/jobber", json=webhook)
-            
-            # Should return error
-            assert response.status_code == 500
-            assert "Failed to create visit" in response.json()["detail"]
-            
-            # Local booking should be rolled back (not in database)
-            visits = get_visits()
-            assert len(visits) == 0
-            
-            # Quote should not be marked as processed
-            processed = get_processed_quote("Q_ROLLBACK_TEST")
-            assert processed is None
+                    # Should return error
+                    assert response.status_code == 500
+                    assert "Failed to create visit" in response.json()["detail"]
+                    
+                    # Local booking should be rolled back (not in database)
+                    visits = get_visits()
+                    assert len(visits) == 0
+                    
+                    # Quote should not be marked as processed
+                    processed = get_processed_quote("Q_ROLLBACK_TEST")
+                    assert processed is None
     
     def test_visit_creation_success_marks_as_processed(self):
         """If visit creation succeeds, quote should be marked as processed."""
@@ -101,30 +113,42 @@ class TestVisitCreationFailureRollback:
         mock_job = {"id": "J_TEST"}
         mock_visit = {"id": "V_TEST"}
         
-        with patch('src.webapp.JobberClient') as mock_client_class:
-            mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
-            mock_client.get_quote = AsyncMock(return_value=mock_quote)
-            mock_client.create_job = AsyncMock(return_value=mock_job)
-            mock_client.create_visit = AsyncMock(return_value=mock_visit)
-            
-            with patch('src.webapp.auto_book') as mock_auto_book:
-                mock_auto_book.return_value = {
-                    "startAt": (datetime.now()).isoformat(),
-                    "endAt": (datetime.now()).isoformat(),
-                    "booking_status": "confirmed",
-                    "weather_confidence": "high"
-                }
-                
-                response = client.post("/webhook/jobber", json=webhook)
-                
-                # Should succeed
-                assert response.status_code == 200
-                
-                # Quote should be marked as processed
-                processed = get_processed_quote("Q_SUCCESS_TEST")
-                assert processed is not None
-                assert processed["quote_id"] == "Q_SUCCESS_TEST"
+        # Mock weather API and background task
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                with patch('src.webapp.JobberClient') as mock_client_class:
+                    mock_client = MagicMock()
+                    mock_client_class.return_value = mock_client
+                    mock_client.get_quote = AsyncMock(return_value=mock_quote)
+                    mock_client.create_job = AsyncMock(return_value=mock_job)
+                    mock_client.create_visit = AsyncMock(return_value=mock_visit)
+                    
+                    with patch('src.webapp.auto_book') as mock_auto_book:
+                        mock_auto_book.return_value = {
+                            "startAt": (datetime.now()).isoformat(),
+                            "endAt": (datetime.now()).isoformat(),
+                            "booking_status": "confirmed",
+                            "weather_confidence": "high"
+                        }
+                        
+                        response = client.post("/webhook/jobber", json=webhook)
+                        
+                        # Should succeed
+                        assert response.status_code == 200
+                        
+                        # Quote should be marked as processed
+                        processed = get_processed_quote("Q_SUCCESS_TEST")
+                        assert processed is not None
+                        assert processed["quote_id"] == "Q_SUCCESS_TEST"
 
 
 class TestIdempotencyWithQuoteId:
@@ -215,25 +239,37 @@ class TestAppIdValidation:
             "property": {"id": "P_TEST"}
         }
         
-        with patch('src.webapp.JobberClient') as mock_client_class:
-            mock_client = MagicMock()
-            mock_client_class.return_value = mock_client
-            mock_client.get_quote = AsyncMock(return_value=mock_quote)
-            mock_client.create_job = AsyncMock(return_value={"id": "J_TEST"})
-            mock_client.create_visit = AsyncMock(return_value={"id": "V_TEST"})
-            
-            with patch('src.webapp.auto_book') as mock_auto_book:
-                mock_auto_book.return_value = {
-                    "startAt": datetime.now().isoformat(),
-                    "endAt": datetime.now().isoformat(),
-                    "booking_status": "confirmed",
-                    "weather_confidence": "high"
-                }
-                
-                response = client.post("/webhook/jobber", json=webhook)
-                
-                # Should proceed (may fail later, but appId validation passed)
-                assert response.status_code in [200, 400, 500]  # Not 401
+        # Mock weather API and background task
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                with patch('src.webapp.JobberClient') as mock_client_class:
+                    mock_client = MagicMock()
+                    mock_client_class.return_value = mock_client
+                    mock_client.get_quote = AsyncMock(return_value=mock_quote)
+                    mock_client.create_job = AsyncMock(return_value={"id": "J_TEST"})
+                    mock_client.create_visit = AsyncMock(return_value={"id": "V_TEST"})
+                    
+                    with patch('src.webapp.auto_book') as mock_auto_book:
+                        mock_auto_book.return_value = {
+                            "startAt": datetime.now().isoformat(),
+                            "endAt": datetime.now().isoformat(),
+                            "booking_status": "confirmed",
+                            "weather_confidence": "high"
+                        }
+                        
+                        response = client.post("/webhook/jobber", json=webhook)
+                        
+                        # Should proceed (may fail later, but appId validation passed)
+                        assert response.status_code in [200, 400, 500]  # Not 401
     
     def test_webhook_allows_missing_app_id(self):
         """Webhook should allow missing appId (optional field)."""

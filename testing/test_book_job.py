@@ -184,58 +184,86 @@ def test_webhook_variations():
     Test different webhook scenarios using production endpoint.
     Tests that webhook properly handles different quote statuses.
     """
-    # Test approved quote
-    webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id="Q_APPROVED")
-    quote_data = generate_mock_quote_for_graphql(
-        quote_id="Q_APPROVED",
-        cost=720.0,
-        client_id="C_VAR1"
-    )
-    
-    with patch_jobber_client_for_test(quote_data=quote_data):
-        response = client.post("/webhook/jobber", json=webhook)
-        assert response.status_code == 202  # Accepted for processing
-    
-    # Test rejected quote (should be ignored)
-    webhook_rejected = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id="Q_REJECTED")
-    quote_data_rejected = generate_mock_quote_for_graphql(
-        quote_id="Q_REJECTED",
-        cost=400.0,
-        client_id="C_VAR2"
-    )
-    # Override status to rejected
-    quote_data_rejected["quoteStatus"] = "rejected"
-    
-    with patch_jobber_client_for_test(quote_data=quote_data_rejected):
-        response = client.post("/webhook/jobber", json=webhook_rejected)
-        # Should return 200 with ignored status (not 202, since it's not queued)
-        assert response.status_code == 200
-        data = response.json()
-        assert "ignored" in data["status"].lower() or "not approved" in data["status"].lower()
+    # Mock weather API to prevent real API calls
+    with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+        mock_weather.return_value = {
+            "list": [
+                {
+                    "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                    "weather": [{"main": "Clear"}],
+                    "pop": 0.1
+                }
+            ]
+        }
+        
+        # Mock background task to prevent synchronous execution delays
+        with patch('src.webapp.process_webhook_background') as mock_background:
+            # Test approved quote
+            webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id="Q_APPROVED")
+            quote_data = generate_mock_quote_for_graphql(
+                quote_id="Q_APPROVED",
+                cost=720.0,
+                client_id="C_VAR1"
+            )
+            
+            with patch_jobber_client_for_test(quote_data=quote_data):
+                response = client.post("/webhook/jobber", json=webhook)
+                assert response.status_code == 202  # Accepted for processing
+            
+            # Test rejected quote (should be ignored)
+            webhook_rejected = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id="Q_REJECTED")
+            quote_data_rejected = generate_mock_quote_for_graphql(
+                quote_id="Q_REJECTED",
+                cost=400.0,
+                client_id="C_VAR2"
+            )
+            # Override status to rejected
+            quote_data_rejected["quoteStatus"] = "rejected"
+            
+            with patch_jobber_client_for_test(quote_data=quote_data_rejected):
+                response = client.post("/webhook/jobber", json=webhook_rejected)
+                # Should return 200 with ignored status (not 202, since it's not queued)
+                assert response.status_code == 200
+                data = response.json()
+                assert "ignored" in data["status"].lower() or "not approved" in data["status"].lower()
 
 
 def test_client_id_extraction():
     """
     Test that client IDs are properly extracted from GraphQL quote responses
     """
-    test_cases = [
-        {"quote_id": "Q_CLIENT1", "client_id": "C_CLIENT1", "cost": 360.0},
-        {"quote_id": "Q_CLIENT2", "client_id": "C_CLIENT2", "cost": 720.0},
-        {"quote_id": "Q_CLIENT3", "client_id": "C_CLIENT3", "cost": 1440.0},
-    ]
-    
-    for case in test_cases:
-        webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id=case["quote_id"])
-        quote_data = generate_mock_quote_for_graphql(
-            quote_id=case["quote_id"],
-            cost=case["cost"],
-            client_id=case["client_id"]
-        )
+    # Mock weather API to prevent real API calls
+    with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+        mock_weather.return_value = {
+            "list": [
+                {
+                    "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                    "weather": [{"main": "Clear"}],
+                    "pop": 0.1
+                }
+            ]
+        }
         
-        with patch_jobber_client_for_test(quote_data=quote_data):
-            response = client.post("/webhook/jobber", json=webhook)
-            # Should accept the webhook
-            assert response.status_code in [200, 202]
+        # Mock background task to prevent synchronous execution delays
+        with patch('src.webapp.process_webhook_background') as mock_background:
+            test_cases = [
+                {"quote_id": "Q_CLIENT1", "client_id": "C_CLIENT1", "cost": 360.0},
+                {"quote_id": "Q_CLIENT2", "client_id": "C_CLIENT2", "cost": 720.0},
+                {"quote_id": "Q_CLIENT3", "client_id": "C_CLIENT3", "cost": 1440.0},
+            ]
+            
+            for case in test_cases:
+                webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id=case["quote_id"])
+                quote_data = generate_mock_quote_for_graphql(
+                    quote_id=case["quote_id"],
+                    cost=case["cost"],
+                    client_id=case["client_id"]
+                )
+                
+                with patch_jobber_client_for_test(quote_data=quote_data):
+                    response = client.post("/webhook/jobber", json=webhook)
+                    # Should accept the webhook
+                    assert response.status_code in [200, 202]
 
 
 def test_calander_table_operations():
@@ -282,32 +310,46 @@ def test_time_estimation_with_client_tracking():
     """
     from src.api.scheduler import estimate_time
 
-    # Test various cost scenarios
-    test_costs = [
-        (180, "1 hour"),  # 1 hour job
-        (720, "4 hours"),  # Half day
-        (1440, "8 hours"),  # Full day
-        (2880, "2 days")  # Multi-day
-    ]
+    # Mock weather API to prevent real API calls
+    with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+        mock_weather.return_value = {
+            "list": [
+                {
+                    "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                    "weather": [{"main": "Clear"}],
+                    "pop": 0.1
+                }
+            ]
+        }
+        
+        # Mock background task to prevent synchronous execution delays
+        with patch('src.webapp.process_webhook_background') as mock_background:
+            # Test various cost scenarios
+            test_costs = [
+                (180, "1 hour"),  # 1 hour job
+                (720, "4 hours"),  # Half day
+                (1440, "8 hours"),  # Full day
+                (2880, "2 days")  # Multi-day
+            ]
 
-    for cost, description in test_costs:
-        duration = estimate_time(cost)
-        assert duration != -1, f"Failed for {description} (${cost})"
+            for cost, description in test_costs:
+                duration = estimate_time(cost)
+                assert duration != -1, f"Failed for {description} (${cost})"
 
-        # Create webhook and quote data for this cost
-        quote_id = f"Q_{cost}"
-        client_id = f"C_{cost}"
-        webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id=quote_id)
-        quote_data = generate_mock_quote_for_graphql(
-            quote_id=quote_id,
-            cost=cost,
-            client_id=client_id
-        )
+                # Create webhook and quote data for this cost
+                quote_id = f"Q_{cost}"
+                client_id = f"C_{cost}"
+                webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id=quote_id)
+                quote_data = generate_mock_quote_for_graphql(
+                    quote_id=quote_id,
+                    cost=cost,
+                    client_id=client_id
+                )
 
-        with patch_jobber_client_for_test(quote_data=quote_data):
-            response = client.post("/webhook/jobber", json=webhook)
-            # Should accept the webhook
-            assert response.status_code in [200, 202]
+                with patch_jobber_client_for_test(quote_data=quote_data):
+                    response = client.post("/webhook/jobber", json=webhook)
+                    # Should accept the webhook
+                    assert response.status_code in [200, 202]
 
 
 def test_scheduling_conflict_detection():
@@ -325,19 +367,33 @@ def test_scheduling_conflict_detection():
     existing_end = "2025-08-30T12:00:00"
     add_visit(existing_start, existing_end, "C_EXISTING")
 
-    # Try to book overlapping slot for different client
-    webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id="Q_CONFLICT_TEST")
-    quote_data = generate_mock_quote_for_graphql(
-        quote_id="Q_CONFLICT_TEST",
-        cost=360.0,  # 2 hour job
-        client_id="C_NEW"
-    )
-
-    with patch_jobber_client_for_test(quote_data=quote_data):
-        response = client.post("/webhook/jobber", json=webhook)
+    # Mock weather API to prevent real API calls
+    with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+        mock_weather.return_value = {
+            "list": [
+                {
+                    "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                    "weather": [{"main": "Clear"}],
+                    "pop": 0.1
+                }
+            ]
+        }
         
-        # Should accept webhook (202) or return error (400/500)
-        assert response.status_code in [200, 202, 400, 500]
+        # Mock background task to prevent synchronous execution delays
+        with patch('src.webapp.process_webhook_background') as mock_background:
+            # Try to book overlapping slot for different client
+            webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id="Q_CONFLICT_TEST")
+            quote_data = generate_mock_quote_for_graphql(
+                quote_id="Q_CONFLICT_TEST",
+                cost=360.0,  # 2 hour job
+                client_id="C_NEW"
+            )
+
+            with patch_jobber_client_for_test(quote_data=quote_data):
+                response = client.post("/webhook/jobber", json=webhook)
+                
+                # Should accept webhook (202) or return error (400/500)
+                assert response.status_code in [200, 202, 400, 500]
 
         if response.status_code == 202:
             # Webhook accepted, will be processed in background
