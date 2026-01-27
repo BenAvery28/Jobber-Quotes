@@ -15,6 +15,7 @@ os.environ["OPENWEATHER_API_KEY"] = "test_weather_key"
 
 from fastapi.testclient import TestClient
 from datetime import datetime, timedelta
+from unittest.mock import patch
 from src.webapp import app
 from src.db import init_db, clear_visits, get_visits, get_booked_days_in_current_month, clear_processed_quotes
 from testing.mock_data import generate_jobber_webhook, generate_mock_quote_for_graphql
@@ -42,11 +43,23 @@ class TestWebhookToCalanderFlow:
             client_id="C500"
         )
         
-        with patch_jobber_client_for_test(quote_data=quote_data):
-            response = client.post("/webhook/jobber", json=webhook)
-            # Webhook should be accepted (202)
-            assert response.status_code == 202
-            # Note: Actual database entry creation happens in background task
+        # Mock weather API and background task to prevent real API calls and delays
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                with patch_jobber_client_for_test(quote_data=quote_data):
+                    response = client.post("/webhook/jobber", json=webhook)
+                    # Webhook should be accepted (202)
+                    assert response.status_code == 202
+                    # Note: Actual database entry creation happens in background task
 
     def test_rejected_quote_no_calander_entry(self):
         """Test that rejected quotes don't create calander entries"""
@@ -59,12 +72,24 @@ class TestWebhookToCalanderFlow:
         # Override status to rejected
         quote_data["quoteStatus"] = "rejected"
         
-        with patch_jobber_client_for_test(quote_data=quote_data):
-            response = client.post("/webhook/jobber", json=webhook)
-            # Should return 200 with ignored status (not 202, since it's not queued)
-            assert response.status_code == 200
-            response_data = response.json()
-            assert "ignored" in response_data["status"].lower() or "not approved" in response_data["status"].lower()
+        # Mock weather API and background task
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                with patch_jobber_client_for_test(quote_data=quote_data):
+                    response = client.post("/webhook/jobber", json=webhook)
+                    # Should return 200 with ignored status (not 202, since it's not queued)
+                    assert response.status_code == 200
+                    response_data = response.json()
+                    assert "ignored" in response_data["status"].lower() or "not approved" in response_data["status"].lower()
 
         # No calander entry should be created
         visits = get_visits()
@@ -78,18 +103,30 @@ class TestWebhookToCalanderFlow:
             {"quote_id": "Q_MULTI3", "client_id": "C_MULTI3", "cost": 1440.0},
         ]
         
-        for case in test_cases:
-            webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id=case["quote_id"])
-            quote_data = generate_mock_quote_for_graphql(
-                quote_id=case["quote_id"],
-                cost=case["cost"],
-                client_id=case["client_id"]
-            )
-            
-            with patch_jobber_client_for_test(quote_data=quote_data):
-                response = client.post("/webhook/jobber", json=webhook)
-                # Should accept webhook
-                assert response.status_code == 202
+        # Mock weather API and background task once for all test cases
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                for case in test_cases:
+                    webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id=case["quote_id"])
+                    quote_data = generate_mock_quote_for_graphql(
+                        quote_id=case["quote_id"],
+                        cost=case["cost"],
+                        client_id=case["client_id"]
+                    )
+                    
+                    with patch_jobber_client_for_test(quote_data=quote_data):
+                        response = client.post("/webhook/jobber", json=webhook)
+                        # Should accept webhook
+                        assert response.status_code == 202
 
     def test_scheduling_preserves_client_separation(self):
         """Test that different clients get different time slots via webhook"""
@@ -107,15 +144,27 @@ class TestWebhookToCalanderFlow:
             client_id="C601"
         )
 
-        # Book first client
-        with patch_jobber_client_for_test(quote_data=quote_data1):
-            response1 = client.post("/webhook/jobber", json=webhook1)
-            assert response1.status_code == 202
+        # Mock weather API and background task
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                # Book first client
+                with patch_jobber_client_for_test(quote_data=quote_data1):
+                    response1 = client.post("/webhook/jobber", json=webhook1)
+                    assert response1.status_code == 202
 
-        # Book second client
-        with patch_jobber_client_for_test(quote_data=quote_data2):
-            response2 = client.post("/webhook/jobber", json=webhook2)
-            assert response2.status_code == 202
+                # Book second client
+                with patch_jobber_client_for_test(quote_data=quote_data2):
+                    response2 = client.post("/webhook/jobber", json=webhook2)
+                    assert response2.status_code == 202
 
     def test_cost_based_time_estimation_stored_correctly(self):
         """Test that different job costs are processed via webhook"""
@@ -125,19 +174,31 @@ class TestWebhookToCalanderFlow:
             {"cost": 1440.00, "expected_hours": 8, "client_id": "C702"},  # 8 hours
         ]
 
-        for test_case in cost_test_cases:
-            quote_id = f"Q_{test_case['client_id']}"
-            webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id=quote_id)
-            quote_data = generate_mock_quote_for_graphql(
-                quote_id=quote_id,
-                cost=test_case["cost"],
-                client_id=test_case["client_id"]
-            )
+        # Mock weather API and background task once for all test cases
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                for test_case in cost_test_cases:
+                    quote_id = f"Q_{test_case['client_id']}"
+                    webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id=quote_id)
+                    quote_data = generate_mock_quote_for_graphql(
+                        quote_id=quote_id,
+                        cost=test_case["cost"],
+                        client_id=test_case["client_id"]
+                    )
 
-            with patch_jobber_client_for_test(quote_data=quote_data):
-                response = client.post("/webhook/jobber", json=webhook)
-                # Should accept webhook (actual processing happens in background)
-                assert response.status_code == 202
+                    with patch_jobber_client_for_test(quote_data=quote_data):
+                        response = client.post("/webhook/jobber", json=webhook)
+                        # Should accept webhook (actual processing happens in background)
+                        assert response.status_code == 202
 
 
 class TestCalanderDataConsistency:
@@ -159,11 +220,23 @@ class TestCalanderDataConsistency:
             client_id="C800"
         )
 
-        with patch_jobber_client_for_test(quote_data=quote_data):
-            response = client.post("/webhook/jobber", json=webhook)
-            # Should accept webhook
-            assert response.status_code == 202
-            # Note: Database entry creation happens in background task
+        # Mock weather API and background task
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                with patch_jobber_client_for_test(quote_data=quote_data):
+                    response = client.post("/webhook/jobber", json=webhook)
+                    # Should accept webhook
+                    assert response.status_code == 202
+                    # Note: Database entry creation happens in background task
 
     def test_monthly_booking_count_accuracy(self):
         """Test that monthly booking count reflects actual database state"""
@@ -185,20 +258,32 @@ class TestCalanderDataConsistency:
 
         successful_current_month = 0
 
-        for booking_date, client_id in current_month_bookings + next_month_bookings:
-            quote_id = f"Q_{client_id}"
-            webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id=quote_id)
-            quote_data = generate_mock_quote_for_graphql(
-                quote_id=quote_id,
-                cost=360.00,
-                client_id=client_id
-            )
+        # Mock weather API and background task once for all bookings
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                for booking_date, client_id in current_month_bookings + next_month_bookings:
+                    quote_id = f"Q_{client_id}"
+                    webhook = generate_jobber_webhook(topic="QUOTE_APPROVED", item_id=quote_id)
+                    quote_data = generate_mock_quote_for_graphql(
+                        quote_id=quote_id,
+                        cost=360.00,
+                        client_id=client_id
+                    )
 
-            with patch_jobber_client_for_test(quote_data=quote_data):
-                response = client.post("/webhook/jobber", json=webhook)
+                    with patch_jobber_client_for_test(quote_data=quote_data):
+                        response = client.post("/webhook/jobber", json=webhook)
 
-                if response.status_code == 202 and client_id.startswith("C90") and not client_id == "C904":
-                    successful_current_month += 1
+                        if response.status_code == 202 and client_id.startswith("C90") and not client_id == "C904":
+                            successful_current_month += 1
 
         # Check monthly count - should count distinct days only
         booked_days = get_booked_days_in_current_month()
@@ -247,16 +332,28 @@ class TestErrorHandlingWithCalander:
             client_id="C1000"
         )
 
-        with patch_jobber_client_for_test(quote_data=quote_data):
-            response = client.post("/webhook/jobber", json=webhook)
-            # Should either accept (202) or reject (400) depending on validation
-            assert response.status_code in [202, 400]
-            
-            if response.status_code == 400:
-                # No database entry should be created for failed bookings
-                visits = get_visits()
-                client_ids = [visit["client_id"] for visit in visits]
-                assert "C1000" not in client_ids
+        # Mock weather API and background task
+        with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+            mock_weather.return_value = {
+                "list": [
+                    {
+                        "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                        "weather": [{"main": "Clear"}],
+                        "pop": 0.1
+                    }
+                ]
+            }
+            with patch('src.webapp.process_webhook_background') as mock_background:
+                with patch_jobber_client_for_test(quote_data=quote_data):
+                    response = client.post("/webhook/jobber", json=webhook)
+                    # Should either accept (202) or reject (400) depending on validation
+                    assert response.status_code in [202, 400]
+                    
+                    if response.status_code == 400:
+                        # No database entry should be created for failed bookings
+                        visits = get_visits()
+                        client_ids = [visit["client_id"] for visit in visits]
+                        assert "C1000" not in client_ids
 
     def teardown_method(self):
         """Cleanup after each test"""

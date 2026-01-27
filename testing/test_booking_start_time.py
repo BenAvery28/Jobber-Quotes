@@ -68,10 +68,22 @@ def test_booking_starts_from_now_midday():
         client_id="C_MIDDAY"
     )
     
-    with patch_jobber_client_for_test(quote_data=quote_data):
-        response = client.post("/webhook/jobber", json=webhook)
-        # Webhook should be accepted (202) - actual booking happens in background
-        assert response.status_code == 202
+    # Mock weather API and background task to prevent real API calls and delays
+    with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+        mock_weather.return_value = {
+            "list": [
+                {
+                    "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                    "weather": [{"main": "Clear"}],
+                    "pop": 0.1
+                }
+            ]
+        }
+        with patch('src.webapp.process_webhook_background') as mock_background:
+            with patch_jobber_client_for_test(quote_data=quote_data):
+                response = client.post("/webhook/jobber", json=webhook)
+                # Webhook should be accepted (202) - actual booking happens in background
+                assert response.status_code == 202
 
 
 def test_booking_starts_from_now_morning():
@@ -86,10 +98,22 @@ def test_booking_starts_from_now_morning():
         client_id="C_MORNING"
     )
     
-    with patch_jobber_client_for_test(quote_data=quote_data):
-        response = client.post("/webhook/jobber", json=webhook)
-        # Webhook should be accepted
-        assert response.status_code == 202
+    # Mock weather API and background task
+    with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+        mock_weather.return_value = {
+            "list": [
+                {
+                    "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                    "weather": [{"main": "Clear"}],
+                    "pop": 0.1
+                }
+            ]
+        }
+        with patch('src.webapp.process_webhook_background') as mock_background:
+            with patch_jobber_client_for_test(quote_data=quote_data):
+                response = client.post("/webhook/jobber", json=webhook)
+                # Webhook should be accepted
+                assert response.status_code == 202
 
 
 def test_booking_after_hours_moves_to_next_day():
@@ -116,11 +140,23 @@ def test_booking_after_hours_moves_to_next_day():
                 client_id="C_AFTER_HOURS"
             )
             
-            with patch_jobber_client_for_test(quote_data=quote_data):
-                response = client.post("/webhook/jobber", json=webhook)
-            
-                # Webhook should be accepted (booking happens in background)
-                assert response.status_code == 202
+            # Mock weather API and background task
+            with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+                mock_weather.return_value = {
+                    "list": [
+                        {
+                            "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                            "weather": [{"main": "Clear"}],
+                            "pop": 0.1
+                        }
+                    ]
+                }
+                with patch('src.webapp.process_webhook_background') as mock_background:
+                    with patch_jobber_client_for_test(quote_data=quote_data):
+                        response = client.post("/webhook/jobber", json=webhook)
+                    
+                        # Webhook should be accepted (booking happens in background)
+                        assert response.status_code == 202
 
 
 def test_booking_weekend_moves_to_monday():
@@ -148,10 +184,22 @@ def test_booking_weekend_moves_to_monday():
                 client_id="C_WEEKEND"
             )
             
-            with patch_jobber_client_for_test(quote_data=quote_data):
-                response = client.post("/webhook/jobber", json=webhook)
-                # Webhook should be accepted
-                assert response.status_code == 202
+            # Mock weather API and background task
+            with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+                mock_weather.return_value = {
+                    "list": [
+                        {
+                            "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                            "weather": [{"main": "Clear"}],
+                            "pop": 0.1
+                        }
+                    ]
+                }
+                with patch('src.webapp.process_webhook_background') as mock_background:
+                    with patch_jobber_client_for_test(quote_data=quote_data):
+                        response = client.post("/webhook/jobber", json=webhook)
+                        # Webhook should be accepted
+                        assert response.status_code == 202
 
 
 def test_booking_response_includes_crew_assignment():
@@ -166,8 +214,20 @@ def test_booking_response_includes_crew_assignment():
         client_id="C_CREW"
     )
     
-    with patch_jobber_client_for_test(quote_data=quote_data):
-        response = client.post("/webhook/jobber", json=webhook)
-        # Webhook should be accepted
-        assert response.status_code == 202
+    # Mock weather API and background task
+    with patch('src.api.weather.get_hourly_forecast') as mock_weather:
+        mock_weather.return_value = {
+            "list": [
+                {
+                    "dt": int((datetime.now() + timedelta(days=1)).timestamp()),
+                    "weather": [{"main": "Clear"}],
+                    "pop": 0.1
+                }
+            ]
+        }
+        with patch('src.webapp.process_webhook_background') as mock_background:
+            with patch_jobber_client_for_test(quote_data=quote_data):
+                response = client.post("/webhook/jobber", json=webhook)
+                # Webhook should be accepted
+                assert response.status_code == 202
 
